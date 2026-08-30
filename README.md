@@ -1,118 +1,118 @@
 <div align="center">
+  <img src="Logo.png" alt="Avyra logo" width="160" />
 
-<br/>
-<br/>
+  # Avyra
 
-<img src="Logo.png" alt="Avyra app icon" width="200" />
+  An Android music player built around artwork, playback controls, and a clean library.
 
-# TM Avyra
+  [![Android CI](https://github.com/Akihiro2004/Avyra/actions/workflows/android.yml/badge.svg)](https://github.com/Akihiro2004/Avyra/actions/workflows/android.yml)
+  [![License: GPL v3](https://img.shields.io/badge/license-GPLv3-blue.svg)](LICENSE)
 
-### An artwork-led music player
-
-<br/>
-
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-7057FF?style=for-the-badge)](LICENSE)
-
-<br/>
-
-[**Download**](#download) · [**Features**](#features) · [**Support**](#support) · [**Disclaimer**](#disclaimer)
-
+  [Download](https://github.com/Akihiro2004/Avyra/releases/latest) · [Report a bug](https://github.com/Akihiro2004/Avyra/issues/new?template=bug_report.yml) · [Request a feature](https://github.com/Akihiro2004/Avyra/issues/new?template=feature_request.yml)
 </div>
 
-> [!WARNING]
-> Avyra is not affiliated with, endorsed by, or connected to YouTube or Google in any way. Use it at your own discretion.
+Avyra started from an earlier open-source music player, but it has grown into its own project with a new package, visual identity, playback work, and project direction. The original contributors are still credited in the Git history. I want this repository to be a place where people can understand the code, build it themselves, and help improve it.
 
----
+Avyra is still a young project. Some integrations depend on third-party services that can change without warning, so please report breakage with logs and clear steps when possible.
 
-<div align="center">
+## What it can do
 
-<img src="Banner.png" alt="Avyra banner" width="100%" />
+- Search, browse, and play music through YouTube Music.
+- Play local songs and show downloaded music from the device library.
+- Save supported streams with artwork, tags, and embedded lyrics.
+- Show line-synced and word-synced lyrics from several providers.
+- Keep a local listening history and build Replay statistics.
+- Use gapless playback, crossfade, playback speed, skip silence, sleep timer, and an equalizer.
+- Run Automix experiments with local beat, vocal, and transition analysis.
+- Use a configured module source for higher quality audio, with YouTube Music as a fallback.
+- Connect optional Last.fm, ListenBrainz, and Discord integrations.
+- Use animated artwork and colors taken from the current album cover.
 
-<h1><a id="features"></a>Features</h1>
+<p align="center">
+  <img src="brand/avyra-library.png" alt="Avyra library screen" width="31%" />
+  <img src="brand/avyra-settings-current.png" alt="Avyra settings screen" width="31%" />
+</p>
 
-<table>
-  <tr>
-    <td width="50%" valign="top">
+## Before installing
 
-#### Playback
-- **Search, browse and play** anything available on YouTube Music.
-- **Hi-Res lossless audio** — FLAC/ALAC from a configured module source, with YouTube Music as fallback.
-- **Gapless playback with true crossfade**, adjustable 0–12s.
-- **Automix [Beta]** — DJ-style transitions with beat-matching and tempo-stretching.
-- **Offline downloads** — save tracks with embedded metadata.
-- **Local music library** integration.
-- **Background playback** via a proper foreground media session.
+Avyra is an unofficial client. It is not affiliated with Google, YouTube, Spotify, Apple, Deezer, Discord, or any other service used by the app.
 
-#### Experience
-- **Animated album canvas** — motion artwork on the now-playing screen.
-- **Word-synced lyrics** — word/syllable-level highlighting from multiple sources.
-- **Dynamic, artwork-driven theming** — Material palette extracted from album art.
-- **Avyra Orbit UI** — violet–aqua identity, editorial shelves, artwork-aware surfaces, and Material 3 foundations.
+You are responsible for following the terms of the services you connect and the laws that apply where you live. The app does not host music. Downloaded files come from sources selected by the user, and those files are saved to the device's Music folder.
 
-    </td>
-    <td width="50%" valign="top">
+The Discord connection uses an account token for an unofficial Rich Presence connection. That can carry account and terms-of-service risk. Leave it disconnected if you are not comfortable with that.
 
-#### Connectivity & Accounts
-- **Sign in with your Google account** for personalized content.
-- **Discord Rich Presence** — in-app login, live track/artist/album and progress.
-- **Scrobbling** to Last.fm and ListenBrainz.
-- **Pluggable sources** — add, edit, test and health-check module sources.
+## Build it locally
 
-#### Controls & Tweaks
-- **Per-network audio quality** — separate quality ceilings for Wi-Fi and mobile data.
-- **Playback speed control** (0.5×–2.0×) and **skip silence**.
-- **Sleep timer** — fixed presets or "stop after this track".
-- **System equalizer** integration.
-- **Stats for nerds** — codec, bit depth, sample rate, and more on the now-playing screen.
+### Requirements
 
-    </td>
-  </tr>
-</table>
+- Android Studio with Android SDK 36
+- JDK 17
+- Android NDK `27.0.12077973`
+- CMake `3.22.1`
+- Git
 
-</div>
+Android Studio can install the SDK, NDK, and CMake versions from SDK Manager. The Gradle wrapper is already included in the repository.
 
----
+### Setup
 
-<div align="center">
+```bash
+git clone https://github.com/Akihiro2004/Avyra.git
+cd Avyra
+```
 
-<h1><a id="download"></a>Download</h1>
+Open the folder in Android Studio and let it create `local.properties` with your Android SDK path. Optional settings can then be added to that same file. A safe template is available in [`local.properties.example`](local.properties.example).
 
-No public Avyra release repository is configured yet. Build the APK locally, or replace this paragraph with your own signed-release link before publishing.
+The app builds without any optional service keys:
 
-</div>
+```powershell
+.\gradlew.bat testProdReleaseUnitTest assembleDevDebug
+```
 
----
+On Linux or macOS:
 
-<div align="center">
+```bash
+./gradlew testProdReleaseUnitTest assembleDevDebug
+```
 
-<h1><a id="support"></a>Project status</h1>
+The development APK will be written to `app/build/outputs/apk/dev/debug/`. Development builds use `com.avyra.music.dev`, while production builds use `com.avyra.music`.
 
-Avyra's public repository, release signing identity, issue tracker, and support channels still need to be supplied by the Avyra maintainer before distribution.
+### Optional local settings
 
-</div>
+| Name | What it is for |
+| --- | --- |
+| `MODULE_INDEX_URL` | Default module index used for optional audio sources |
+| `AVYRA_UPDATE_API_URL` | GitHub latest-release API endpoint for update checks |
+| `AVYRA_DISCORD_APPLICATION_ID` | Avyra-owned Discord application ID for Rich Presence |
+| `LASTFM_API_KEY` | Last.fm API key |
+| `LASTFM_SECRET` | Last.fm API secret |
 
----
+Keep real values in `local.properties` or local environment variables. That file is ignored by Git. Do not put cookies, account tokens, signing passwords, or API secrets in a commit.
 
-<div align="center">
+Release signing is optional for a local compile. See [`keystore.properties.example`](keystore.properties.example) if you need to make an installable release that can be updated later with the same key.
 
-<h1><a id="disclaimer"></a>Disclaimer & Legal Notice</h1>
+## How the app is arranged
 
-TM Avyra, normally presented as **Avyra**, is an independent, community-driven third-party audio player and client. It is **not** associated with Google LLC, YouTube Music, Spotify, Apple Music, Deezer, or any of their parent companies.
+Most of the application code is under `app/src/main/java/com/avyra/music`.
 
-* **No Media Hosting:** Avyra does not host, upload, or store copyrighted music files. It operates strictly as an interface to scan local device storage or stream media directly from public, public-facing, or user-authenticated APIs.
-* **Fair Use & API Usage:** This software is created solely for personal research, educational, and fair-use purposes. The user is entirely responsible for ensuring their usage aligns with their local copyright laws and YouTube Terms of Service.
-* **No Ad-Blocking Guarantee:** While Avyra focuses on providing a clean listening environment, it does not guarantee permanent bypasses or modifications to commercial third-party platform conditions.
-* **Copyleft:** Avyra is free software under the GPLv3. The license does not let anyone forbid others from selling or redistributing copies, but any distribution must come with the Corresponding Source under the same license.
-* **Modification notice:** This GPLv3 work was substantially redesigned and rebranded as Avyra on 30 August 2026. Source history and applicable copyright notices are retained with the code.
+- `ui` contains the Compose screens, reusable components, theme, icons, and navigation state.
+- `playback` contains the Media3 service, queue logic, caching, audio processors, and Automix planning.
+- `data` contains network clients, models, settings, lyrics, listening stats, and source selection.
+- `download` contains MediaStore writing and audio metadata tagging.
+- `widget` contains the home-screen media widget.
+- `app/src/main/cpp` contains the native analysis code used by Automix.
 
-</div>
+The normal playback path is UI to `MainViewModel`, then the media controller, `PlaybackService`, a selected source, the audio cache, and finally the Media3 player. Keeping the source resolver separate lets the player fall back when an optional source is unavailable.
 
----
+## Contributing
 
-<div align="center">
+Small fixes are welcome. Please read [`CONTRIBUTING.md`](CONTRIBUTING.md) before opening a pull request. It explains the build checks, code areas, and information that makes a bug report useful.
 
-<h1><a id="license"></a>License</h1>
+For general questions, read [`SUPPORT.md`](SUPPORT.md). Security problems should follow [`SECURITY.md`](SECURITY.md) and should not be posted in a public issue.
 
-This project is licensed under the **GNU General Public License v3.0 (GPLv3)**. See the [LICENSE](LICENSE) file for details.
+## License and credits
 
-</div>
+Avyra's original project code is distributed under the [GNU General Public License version 3](LICENSE). Some Automix files were adapted from Orchard and remain under the GNU Affero General Public License version 3 or later. The AGPL requirements described by section 13 apply to the combined program. See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) and the file headers for the exact boundaries.
+
+The repository also includes or depends on work from projects such as Orchard, Beat This!, Open-Unmix, Kizzy, NewPipeExtractor, AndroidX, Kotlin, Media3, Coil, Ktor, and ONNX Runtime. Their authors and licenses belong to them.
+
+Avyra is maintained as an independent project. The name and logo policy is in [`TRADEMARKS.md`](TRADEMARKS.md).

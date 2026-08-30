@@ -1,0 +1,9 @@
+# Android Studio normally writes sdk.dir for this computer.
+# sdk.dir=C\:\\Users\\YourName\\AppData\\Local\\Android\\Sdk
+
+# Optional Avyra settings. The app can build with these left blank.
+MODULE_INDEX_URL=
+AVYRA_UPDATE_API_URL=https://api.github.com/repos/Akihiro2004/Avyra/releases/latest
+AVYRA_DISCORD_APPLICATION_ID=
+LASTFM_API_KEY=
+LASTFM_SECRET=

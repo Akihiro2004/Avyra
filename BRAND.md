@@ -1,39 +1,46 @@
-# Avyra brand and interface system
+# Avyra brand notes
 
-Avyra is an artwork-led music player with its own **Orbit** visual language. It keeps familiar playback controls where listeners expect them, but its identity, composition, color, typography, navigation, and component geometry are original to Avyra.
+This file is a practical reference for anyone working on the app. It is not meant to sound like a big company brand book. The goal is just to stop the interface from slowly becoming inconsistent.
 
 ## Identity
 
-The mark is a rounded abstract **A** with a forward/play cutout. It is designed as one strong silhouette so the same geometry works as a full-color app icon, a monochrome notification icon, and a small in-app signature.
+The Avyra mark is a rounded letter A with a play-shaped cutout. It should still be easy to recognize as a small notification icon, not only as a large logo.
 
-- Primary: `#7057FF` Avyra Violet
-- Secondary: `#35E2C1` Avyra Aqua
-- Highlight: `#FF7A90` Avyra Coral
-- Dark canvas: `#080A12` Orbit Ink
-- Production icon: `app/src/main/assets/Logo.svg`
-- Transparent mark: `app/src/main/assets/LogoTransparent.svg`
-- Generated source reference: `brand/source/AvyraLogoGeneratedReference.png`
+- Icon plum: `#5B173F`
+- Icon raspberry: `#C93672`
+- Icon coral: `#FF7A45`
+- Primary blue: `#0A84FF` in dark mode and `#007AFF` in light mode
+- Cyan: `#5AC8FA`
+- Pink: `#FF6482`
+- Dark background: `#05070B`
+- Divider color: `#23262E`
 
-Keep clear space around the mark equal to at least one quarter of its width. Do not add sound-wave bands, place it inside a circle, stretch it, or recolor the two-color app-icon background with another product's signature color.
+The main source assets are:
 
-## Interface principles
+- `app/src/main/assets/Logo.svg`
+- `app/src/main/assets/LogoTransparent.svg`
+- `brand/source/AvyraLogoGeneratedReference.png`
 
-1. **Artwork is the atmosphere.** Album color can shape a page, but navigation and controls remain legible on their own surfaces.
-2. **One obvious action.** Primary play controls use violet; secondary actions stay quiet until selected.
-3. **Editorial before grid.** Home and discovery lead with a wide story card, followed by compact shelves.
-4. **Soft geometry, clear hierarchy.** Large surfaces use 22–34 dp corners; controls use 12–18 dp corners; circles are reserved for people and truly radial controls.
-5. **Familiar controls, Avyra composition.** Play, pause, seek, queue, volume, and routing retain standard meanings and accessible targets.
+Give the logo some space. Do not stretch it, put random effects around it, or recolor it to look like another music service.
 
-## Typography
+## Interface rules
 
-Avyra uses the Android sans-serif family so builds do not depend on a platform-owner font license. Display text is wide and calm at weight 700; content uses 400–600. Avoid all-uppercase navigation and oversized heavy labels.
+1. Album artwork can influence the background, but controls still need enough contrast without depending on the artwork.
+2. Each screen should have one action that feels most important. Secondary actions can stay quieter.
+3. Home and discovery can use horizontal shelves. Library screens should be easier to scan as lists.
+4. Use soft corners for artwork and sheets, but do not turn every element into a rounded card.
+5. Keep familiar playback symbols and tap targets. A custom look should not make play, pause, queue, volume, or casting harder to understand.
+6. Prefer the Android sans-serif font family. The project should not depend on a font that cannot be redistributed in an Android app.
 
-## Compatibility boundary
+## App identity
 
-Visible product branding is Avyra. Kotlin namespaces, preference keys, URI schemes, and the legacy `Music/BitChord` import path remain unchanged where replacing them would break downloads, playback queues, or imported user data.
+Production builds use `com.avyra.music`. Development builds use `com.avyra.music.dev`. Kotlin source also uses the `com.avyra.music` namespace.
 
-The distributable application ID is `com.avyra.music`; development builds use `com.avyra.music.dev`. Kotlin namespaces and selected legacy storage/protocol identifiers remain internal compatibility details.
+Old storage names only appear inside migration code so existing users can keep settings, backups, lyrics, and downloads created by earlier builds. New data uses the Avyra identity.
 
-Set `AVYRA_UPDATE_API_URL` in `local.properties` to your own GitHub `releases/latest` API endpoint when your release repository exists. It is blank by default.
+Optional update and Discord settings are kept in local configuration:
 
-Set `AVYRA_DISCORD_APPLICATION_ID` in `local.properties` to an Avyra-owned Discord application identifier. Rich Presence stays disabled when this value is blank, while Discord account connection remains available.
+- `AVYRA_UPDATE_API_URL`
+- `AVYRA_DISCORD_APPLICATION_ID`
+
+Do not commit real account tokens, signing credentials, or private service keys.
