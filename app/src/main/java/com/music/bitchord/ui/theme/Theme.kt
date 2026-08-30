@@ -38,6 +38,16 @@ val AvyraBlue = Color(0xFF0A84FF)
 val AvyraCyan = Color(0xFF5AC8FA)
 val AvyraPink = Color(0xFFFF6482)
 
+/**
+ * The accent the Replay screens colour their rank badges with.
+ *
+ * Upstream's name, kept so those files merge cleanly, but pointed at Avyra's
+ * own accent rather than the red it names — a badge in somebody else's brand
+ * colour is the one thing on those screens that would look borrowed. Rename it
+ * if Replay ever wants an accent of its own; nothing else reads it.
+ */
+val AccentRed = AvyraBlue
+
 /*
  * The dark scheme is the one the app is designed in — it opens on it, and the
  * player fills the screen with artwork whichever theme is set.

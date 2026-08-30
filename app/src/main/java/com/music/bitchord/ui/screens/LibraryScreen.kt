@@ -223,7 +223,6 @@ fun LibraryScreen(
                                 onItemClick = onShelfItemClick,
                                 onItemLongPress = onShelfItemLongPress,
                                 onNewPlaylist = onNewPlaylist,
-                                onShowAll = { onShowAll(emptyPlaylists) },
                             )
                         } else {
                             librarySection(shelf = shelf, onItemClick = onShelfItemClick)
@@ -289,7 +288,6 @@ private fun LazyListScope.playlistSection(
     onItemClick: (ShelfItem) -> Unit,
     onItemLongPress: (ShelfItem) -> Unit,
     onNewPlaylist: () -> Unit,
-    onShowAll: () -> Unit,
     pinnedPlaylists: List<String> = emptyList(),
 ) {
     librarySection(
