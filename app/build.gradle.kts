@@ -319,7 +319,7 @@ dependencies {
     implementation("org.mozilla:rhino-engine:1.8.1")
 
     // ---- Auth/session storage ----
-    implementation("androidx.security:security-crypto:1.1.0-alpha06")
+    implementation("androidx.security:security-crypto:1.1.0")
 
     // ---- JS module execution: QuickJS VM for style source plugins ----
     implementation("io.github.dokar3:quickjs-kt-android:1.0.5")
