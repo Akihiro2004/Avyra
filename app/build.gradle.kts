@@ -31,6 +31,16 @@ val localProps = Properties().apply {
 val moduleIndexUrl: String = localProps.getProperty("MODULE_INDEX_URL", "")
 val updateApiUrl: String = localProps.getProperty("AVYRA_UPDATE_API_URL", "")
 val discordApplicationId: String = localProps.getProperty("AVYRA_DISCORD_APPLICATION_ID", "")
+val lastfmApiKey: String = (
+    localProps.getProperty("LASTFM_API_KEY")
+        ?: System.getenv("LASTFM_API_KEY")
+        ?: ""
+    ).trim()
+val lastfmSecret: String = (
+    localProps.getProperty("LASTFM_SECRET")
+        ?: System.getenv("LASTFM_SECRET")
+        ?: ""
+    ).trim()
 
 android {
     namespace = "com.music.bitchord"
@@ -42,8 +52,8 @@ android {
         // Haze falls back to a translucent scrim below that.
         minSdk = 26
         targetSdk = 36
-        versionCode = 6
-        versionName = "1.4.1"
+        versionCode = 10
+        versionName = "1.5"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -54,6 +64,10 @@ android {
         // Discord Rich Presence must be registered to Avyra. Keeping this
         // blank disables presence publishing without affecting Discord login.
         buildConfigField("String", "DISCORD_APPLICATION_ID", "\"${discordApplicationId}\"")
+
+        // Last.fm credentials are supplied locally and never committed.
+        buildConfigField("String", "LASTFM_API_KEY", "\"${lastfmApiKey.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
+        buildConfigField("String", "LASTFM_SECRET", "\"${lastfmSecret.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
 
         // Automix's DSP analyzer (native/analyzer). 64-bit only: minSdk 26
         // already postdates the 64-bit requirement, so a 32-bit slice would
@@ -88,9 +102,17 @@ android {
     }
 
     signingConfigs {
-        if (signing.isNotEmpty()) {
+        // Both halves have to be there, not just the properties file: it *names*
+        // the keystore rather than containing it, and both are gitignored
+        // separately, so a checkout can easily end up with the one and not the
+        // other. A signing config pointing at a keystore that is not on disk
+        // fails the release build outright at validateSigningRelease — which is
+        // exactly the failure the unsigned fallback above exists to avoid, so
+        // the keystore has to be looked for rather than assumed.
+        val store = signing.getProperty("storeFile")?.let { rootProject.file(it) }
+        if (store != null && store.exists()) {
             create("release") {
-                storeFile = rootProject.file(signing.getProperty("storeFile"))
+                storeFile = store
                 storePassword = signing.getProperty("storePassword")
                 keyAlias = signing.getProperty("keyAlias")
                 keyPassword = signing.getProperty("keyPassword")
@@ -115,7 +137,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            // Null without keystore.properties: the build then produces
+            // Null without a keystore to sign with: the build then produces
             // app-release-unsigned.apk instead of failing outright.
             signingConfig = signingConfigs.findByName("release")
         }
@@ -127,6 +149,17 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+    }
+    testOptions {
+        unitTests {
+            // Unit tests run against a stub android.jar whose methods throw
+            // rather than return. That is the right default for anything whose
+            // behaviour depends on the framework, and wrong for android.util.Log
+            // — which [TrackLog] calls on every decision the source layer makes,
+            // so a test of that layer fails on the logging rather than on the
+            // logic it was written to check.
+            isReturnDefaultValues = true
+        }
     }
 }
 
@@ -184,16 +217,17 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("androidx.core:core-ktx:1.15.0")
+    implementation("androidx.appcompat:appcompat:1.7.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
 
     // ---- Media playback: Media3 / ExoPlayer ----
-    implementation("androidx.media3:media3-exoplayer:1.5.1")
-    implementation("androidx.media3:media3-session:1.5.1")
-    implementation("androidx.media3:media3-common:1.5.1")
-    implementation("androidx.media3:media3-datasource-okhttp:1.5.1")
+    implementation("androidx.media3:media3-exoplayer:1.11.0")
+    implementation("androidx.media3:media3-session:1.11.0")
+    implementation("androidx.media3:media3-common:1.11.0")
+    implementation("androidx.media3:media3-datasource-okhttp:1.11.0")
     // Audio is progressive, but Apple serves its motion artwork as HLS — this
     // is what lets the animated sleeve play it. See CanvasArtworkPlayer.
-    implementation("androidx.media3:media3-exoplayer-hls:1.5.1")
+    implementation("androidx.media3:media3-exoplayer-hls:1.11.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-guava:1.9.0")
 
     // ---- Images: Coil 3 + Palette (dominant colors for the mesh gradient) ----
@@ -204,6 +238,12 @@ dependencies {
     // ---- Frosted glass / progressive blur (Telegram-style bars) ----
     implementation("dev.chrisbanes.haze:haze:1.3.1")
     implementation("dev.chrisbanes.haze:haze-materials:1.3.1")
+
+    // ---- Markdown rendering (release notes in the update dialog) ----
+    // Pure Compose, not an AndroidView wrapper — needed so the text composes
+    // correctly under the dialog's Haze blur.
+    implementation("com.halilibo.compose-richtext:richtext-ui-material3:0.20.0")
+    implementation("com.halilibo.compose-richtext:richtext-commonmark:0.20.0")
 
     // ---- Innertube (YouTube Music) client: Ktor + kotlinx.serialization ----
     implementation("io.ktor:ktor-client-core:3.0.3")
@@ -239,7 +279,7 @@ dependencies {
     // ---- Auth/session storage ----
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
 
-    // ---- JS module execution: QuickJS VM for Convx-style source plugins ----
+    // ---- JS module execution: QuickJS VM for style source plugins ----
     implementation("io.github.dokar3:quickjs-kt-android:1.0.5")
 
     // ---- Automix: on-device beat/downbeat model (Beat This!, MIT-licensed) ----

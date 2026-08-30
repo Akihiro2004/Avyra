@@ -11,10 +11,13 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
@@ -37,46 +40,76 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
+import com.music.bitchord.BuildConfig
 import com.music.bitchord.R
 import com.music.bitchord.data.model.Account
 import com.music.bitchord.data.settings.AppSettings
-import dev.chrisbanes.haze.HazeState
-import dev.chrisbanes.haze.hazeEffect
-import dev.chrisbanes.haze.materials.ExperimentalHazeMaterialsApi
-import dev.chrisbanes.haze.materials.HazeMaterials
 
 /**
- * Avyra's compact floating chrome. Large page headings remain in the content;
- * this bar becomes an orientation aid only after the content scrolls.
+ * The bar's own height, above whatever inset it is sitting under.
  *
- * The content behind must be tagged with `Modifier.hazeSource(hazeState)`;
- * this bar then samples and blurs whatever scrolls beneath it in real time
- * (RenderEffect on API 31+, translucent scrim fallback below).
- *
- * The big in-list header owns the title at rest; once the list scrolls, the
- * compact title and hairline divider fade in.
+ * The single source of truth for it: the bar lays itself out to this, and
+ * everything that has to clear the bar — page content padding, [TopFadeBlur]'s
+ * ramp, fixed headers that sit directly beneath it — measures from here rather
+ * than from a copy of the number.
  */
-@OptIn(ExperimentalHazeMaterialsApi::class)
+val TopBarContentHeight = 52.dp
+
+/**
+ * The breathing room between the bar's bottom edge and the first thing under
+ * it, so content rests below the glass instead of against it.
+ */
+val TopBarContentGap = 12.dp
+
+/**
+ * How far down the window the bar actually ends: the status bar inset it is
+ * pinned under, plus its own height.
+ *
+ * This has to be read at composition rather than baked in as a constant — the
+ * inset is a property of the device and of the window, not of the app. A phone
+ * with a cutout, one without, and a freeform window with no status bar at all
+ * are all different numbers, and a fixed guess is wrong on all but one of them:
+ * too tight and content is clipped under the bar, too loose and every page
+ * opens on a band of empty space.
+ */
+@Composable
+fun topBarHeight(): Dp =
+    WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + TopBarContentHeight
+
+/**
+ * Where page content should start: clear of the bar, plus [TopBarContentGap].
+ */
+@Composable
+fun topBarContentPadding(): Dp = topBarHeight() + TopBarContentGap
+
+/**
+ * The top bar's content — title, back affordance, actions — over no backdrop
+ * of its own.
+ *
+ * The glass behind it is [TopFadeBlur]'s, drawn underneath: a blur that starts
+ * full at the status bar and ramps to nothing below, so the bar has no bottom
+ * edge to draw a line across the page with. A uniform pane would put that line
+ * back, which is the one thing every surface here is built to avoid.
+ *
+ * The exception is Reduce dynamic blur, where there is no fade to sit on and
+ * the bar fills itself solid instead — title over raw scrolling content is
+ * unreadable, so something has to carry it.
+ *
+ * Apple Music behaviour: the big in-list header owns the title at rest;
+ * once the list scrolls, the small centered title fades in.
+ */
 @Composable
 fun FrostedTopBar(
     title: String,
-    hazeState: HazeState,
     scrolled: Boolean,
     modifier: Modifier = Modifier,
-    /**
-     * Whether the bar carries its own pane of glass.
-     *
-     * False where something behind it is already providing one — [TopFadeBlur]
-     * on a page whose artwork runs up under the status bar. Two panes over the
-     * same content is one too many, and this bar's is the one with the hard
-     * bottom edge.
-     */
-    ownBackdrop: Boolean = true,
     onBack: (() -> Unit)? = null,
     refreshing: Boolean = false,
     // A lambda, not a value: the drag changes every frame, and reading it in
@@ -84,37 +117,36 @@ fun FrostedTopBar(
     pullFraction: () -> Float = { 0f },
     actions: @Composable () -> Unit = {},
 ) {
+    val reduceDynamicBlur by AppSettings.reduceDynamicBlur.collectAsStateWithLifecycle()
     val titleAlpha by animateFloatAsState(
         targetValue = if (scrolled) 1f else 0f,
         animationSpec = tween(220),
         label = "topBarTitleAlpha",
     )
+    // Only the solid bar wants a hairline under it. A faded one has no edge for
+    // the line to mark, and drawing it there would be inventing the very seam
+    // the fade exists to remove.
     val dividerColor by animateColorAsState(
-        targetValue = MaterialTheme.colorScheme.outline.copy(alpha = if (scrolled && ownBackdrop) 0.6f else 0f),
+        targetValue = MaterialTheme.colorScheme.outline.copy(
+            alpha = if (scrolled && reduceDynamicBlur) 0.6f else 0f,
+        ),
         animationSpec = tween(220),
         label = "topBarDivider",
     )
-    val reduceDynamicBlur by AppSettings.reduceDynamicBlur.collectAsStateWithLifecycle()
 
     Column(
         modifier = modifier
             .fillMaxWidth()
             .then(
-                when {
-                    !ownBackdrop -> Modifier
-                    reduceDynamicBlur -> Modifier.background(MaterialTheme.colorScheme.surface)
-                    else -> Modifier.hazeEffect(
-                        state = hazeState,
-                        style = HazeMaterials.thin(MaterialTheme.colorScheme.surface),
-                    )
-                },
+                if (reduceDynamicBlur) Modifier.background(MaterialTheme.colorScheme.surface)
+                else Modifier,
             ),
     ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .statusBarsPadding()
-                .height(52.dp),
+                .height(TopBarContentHeight),
         ) {
             Text(
                 text = title,
@@ -122,13 +154,13 @@ fun FrostedTopBar(
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                textAlign = TextAlign.Start,
+                textAlign = TextAlign.Center,
                 modifier = Modifier
-                    .align(Alignment.CenterStart)
-                    .padding(
-                        start = if (onBack != null) 58.dp else 54.dp,
-                        end = 92.dp,
-                    )
+                    .align(Alignment.Center)
+                    // Reserve room for the back button and the actions so a
+                    // long title truncates instead of running under them.
+                    .padding(horizontal = 96.dp)
+                    .fillMaxWidth()
                     .graphicsLayer { alpha = titleAlpha },
             )
             // On a pushed page the back affordance is always visible, since
@@ -140,7 +172,7 @@ fun FrostedTopBar(
                 ) {
                     Icon(
                         Icons.AutoMirrored.Rounded.ArrowBack,
-                        contentDescription = "Back",
+                        contentDescription = stringResource(R.string.back),
                         tint = MaterialTheme.colorScheme.onSurface,
                     )
                 }
@@ -154,20 +186,21 @@ fun FrostedTopBar(
                     Image(
                         painter = painterResource(R.drawable.ic_logo),
                         contentDescription = null,
-                        // Solid, not accented. The mark is a signature rather
-                        // than a control, and tinting it with the accent put the
-                        // brightest colour in the interface on the one thing in
-                        // the bar that cannot be tapped — which drew the eye to
-                        // the corner and away from the page. Monochrome, it
-                        // reads as letterhead and gets out of the way.
-                        //
-                        // `onBackground` rather than a literal white so the mark
-                        // survives the light theme, where white on white is no
-                        // mark at all. In dark — which is what the app opens on
-                        // — this *is* white.
-                        colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onBackground),
-                        modifier = Modifier.size(24.dp),
+                        colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onSurface),
+                        modifier = Modifier.height(18.dp),
                     )
+                    // The dev flavor gets its own applicationId so it can sit
+                    // installed next to the prod build; this badge is the
+                    // in-app equivalent, so the two are never mixed up at a
+                    // glance once both are running.
+                    if (BuildConfig.FLAVOR == "dev") {
+                        Text(
+                            text = "Dev",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(start = 6.dp),
+                        )
+                    }
                 }
             }
             Row(
@@ -216,7 +249,7 @@ fun TopBarAccountButton(
         if (photo != null) {
             AsyncImage(
                 model = photo,
-                contentDescription = "Settings",
+                contentDescription = stringResource(R.string.settings),
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
                     .size(AVATAR_SIZE)
@@ -234,7 +267,7 @@ fun TopBarAccountButton(
             ) {
                 Icon(
                     Icons.Rounded.Person,
-                    contentDescription = "Settings",
+                    contentDescription = stringResource(R.string.settings),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(18.dp),
                 )

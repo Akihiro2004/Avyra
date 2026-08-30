@@ -6,8 +6,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
@@ -39,12 +41,14 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.LibraryMusic
 import com.music.bitchord.ui.icons.BitChordIcons
+import com.music.bitchord.R
 import coil3.compose.AsyncImage
 import com.music.bitchord.data.model.CARD_ART_PX
 import com.music.bitchord.data.model.HEADER_ART_PX
@@ -53,6 +57,7 @@ import com.music.bitchord.data.model.ShelfItem
 import com.music.bitchord.data.model.UiState
 import com.music.bitchord.data.model.artworkAt
 import com.music.bitchord.ui.components.HERO_CARD_CORNER
+import com.music.bitchord.ui.components.HERO_CARD_RATIO
 import com.music.bitchord.ui.components.MessageState
 import com.music.bitchord.ui.components.PAGE_GUTTER
 import com.music.bitchord.ui.components.SHELF_CARD_CORNER
@@ -61,7 +66,10 @@ import com.music.bitchord.ui.components.SHELF_CARD_WIDTH
 import com.music.bitchord.ui.components.SignInBanner
 import com.music.bitchord.ui.components.feedMoreSkeleton
 import com.music.bitchord.ui.components.feedSkeleton
+import com.music.bitchord.ui.components.heroCardWidth
 import com.music.bitchord.ui.components.thumbnailBorder
+import com.music.bitchord.ui.player.MeshGradientBackground
+import com.music.bitchord.ui.player.MeshPalette
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -78,6 +86,12 @@ fun HomeScreen(
     title: String = "Your sound",
     signedIn: Boolean = true,
     onSignIn: (() -> Unit)? = null,
+    /**
+     * Holding a card rather than tapping it — the album/playlist menu. Only the
+     * cards that point at a collection have one; a card that is a single track
+     * is a track, and its own menu lives on the rows in the lists below.
+     */
+    onItemLongPress: ((ShelfItem) -> Unit)? = null,
     // Explore doesn't page — only Home has a continuation worth following.
     onLoadMore: (() -> Unit)? = null,
     loadingMore: Boolean = false,
@@ -112,7 +126,7 @@ fun HomeScreen(
                     MessageState(state.message, actionLabel = "Retry", onAction = onRetry)
                 }
                 is UiState.Success -> {
-                    itemsIndexedShelves(state.data, onItemClick)
+                    itemsIndexedShelves(state.data, onItemClick, onItemLongPress)
                     if (loadingMore) feedMoreSkeleton()
                 }
             }
@@ -144,71 +158,113 @@ fun HomeScreen(
 private fun androidx.compose.foundation.lazy.LazyListScope.itemsIndexedShelves(
     shelves: List<HomeShelf>,
     onItemClick: (ShelfItem) -> Unit,
+    onItemLongPress: ((ShelfItem) -> Unit)?,
 ) {
     shelves.forEachIndexed { index, shelf ->
         item(key = shelf.title + index) {
             if (index == 0) {
-                HeroShelf(shelf = shelf, onItemClick = onItemClick)
+                HeroShelf(shelf = shelf, onItemClick = onItemClick, onItemLongPress = onItemLongPress)
             } else {
-                Shelf(shelf = shelf, onItemClick = onItemClick)
+                Shelf(shelf = shelf, onItemClick = onItemClick, onItemLongPress = onItemLongPress)
             }
         }
     }
 }
 
-/** Shared by the home feed, Explore and Library so headings line up across tabs. */
+/**
+ * Shared by the home feed, Explore and Library so headings line up across tabs.
+ *
+ * [onShowAll] is only ever set on Library, whose rows stop at five cards
+ * rather than running the shelf's whole length — see [LibraryGridShelf].
+ * Home and Explore never pass it, so their heading is unchanged.
+ */
 @Composable
-internal fun SectionHeader(title: String, subtitle: String = "") {
-    Column(Modifier.padding(horizontal = PAGE_GUTTER, vertical = 10.dp)) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.headlineMedium,
-            color = MaterialTheme.colorScheme.onBackground,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        if (subtitle.isNotBlank()) {
+internal fun SectionHeader(title: String, subtitle: String = "", onShowAll: (() -> Unit)? = null) {
+    Row(
+        modifier = Modifier
+            .padding(horizontal = PAGE_GUTTER, vertical = 10.dp)
+            .fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
             Text(
-                text = subtitle,
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                text = title,
+                style = MaterialTheme.typography.headlineMedium,
+                color = MaterialTheme.colorScheme.onBackground,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+            )
+            if (subtitle.isNotBlank()) {
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        if (onShowAll != null) {
+            Text(
+                text = stringResource(R.string.show_all),
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier
+                    .clickable(onClick = onShowAll)
+                    .padding(start = 12.dp, top = 4.dp, bottom = 4.dp),
             )
         }
     }
 }
 
 @Composable
-private fun HeroShelf(shelf: HomeShelf, onItemClick: (ShelfItem) -> Unit) {
+private fun HeroShelf(
+    shelf: HomeShelf,
+    onItemClick: (ShelfItem) -> Unit,
+    onItemLongPress: ((ShelfItem) -> Unit)? = null,
+) {
     Column(Modifier.padding(bottom = 26.dp)) {
         SectionHeader(shelf.title, shelf.subtitle)
-        LazyRow(
-            state = rememberLazyListState(),
-            contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            items(shelf.items) { item ->
-                HeroCard(
-                    item = item,
-                    onClick = { onItemClick(item) },
-                    modifier = Modifier.fillParentMaxWidth(0.88f),
-                )
+        // Measured rather than taken as a share of the parent, because the card
+        // has a ceiling as well as a fraction — see [heroCardWidth]. A fixed
+        // width is also the only one of the two the aspect ratio below can turn
+        // into a height, so the card keeps its shape however it was arrived at.
+        BoxWithConstraints {
+            val cardWidth = heroCardWidth(maxWidth)
+            LazyRow(
+                state = rememberLazyListState(),
+                contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                items(shelf.items) { item ->
+                    HeroCard(
+                        item = item,
+                        onClick = { onItemClick(item) },
+                        onLongPress = onItemLongPress?.let { { it(item) } },
+                        modifier = Modifier.width(cardWidth),
+                    )
+                }
             }
         }
     }
 }
 
-/** Wide editorial card: artwork and caption share one cinematic surface. */
+/** Big card: artwork with the caption laid over a scrim, as on Listen Now. */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun HeroCard(item: ShelfItem, onClick: () -> Unit, modifier: Modifier = Modifier) {
+private fun HeroCard(
+    item: ShelfItem,
+    onClick: () -> Unit,
+    onLongPress: (() -> Unit)? = null,
+    modifier: Modifier = Modifier,
+) {
     Box(
         modifier = modifier
-            .aspectRatio(1.42f)
+            .aspectRatio(HERO_CARD_RATIO)
             .clip(RoundedCornerShape(HERO_CARD_CORNER))
             .thumbnailBorder(RoundedCornerShape(HERO_CARD_CORNER))
             .background(MaterialTheme.colorScheme.surfaceVariant)
-            .clickable(onClick = onClick),
+            .combinedClickable(onClick = onClick, onLongClick = onLongPress),
     ) {
         AsyncImage(
             model = item.thumbnailUrl.artworkAt(HEADER_ART_PX),
@@ -250,9 +306,9 @@ private fun HeroCard(item: ShelfItem, onClick: () -> Unit, modifier: Modifier = 
 /**
  * [leadingCard] rides at the head of the row, ahead of the content — the
  * Library tab's "New playlist" tile, which belongs among the playlists rather
- * than in a bar somewhere above them. [onItemLongPress] is likewise the
- * Library's: a card is only worth holding where there is something to do to
- * the thing behind it.
+ * than in a bar somewhere above them. [onItemLongPress] opens the album /
+ * playlist menu, and is null only where a card points at something with no
+ * track list behind it to act on.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -291,15 +347,14 @@ internal fun NewShelfCard(
     label: String,
     subtitle: String,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier.width(SHELF_CARD_WIDTH),
 ) {
     Column(
-        modifier = Modifier
-            .width(SHELF_CARD_WIDTH)
-            .clickable(onClick = onClick),
+        modifier = modifier.clickable(onClick = onClick),
     ) {
         Box(
             modifier = Modifier
-                .width(SHELF_CARD_WIDTH)
+                .fillMaxWidth()
                 .aspectRatio(1f)
                 .clip(RoundedCornerShape(SHELF_CARD_CORNER))
                 .background(MaterialTheme.colorScheme.surfaceVariant),
@@ -332,47 +387,60 @@ internal fun NewShelfCard(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ShelfCard(
+internal fun ShelfCard(
     item: ShelfItem,
     onClick: () -> Unit,
     onLongPress: (() -> Unit)? = null,
+    modifier: Modifier = Modifier.width(SHELF_CARD_WIDTH),
+    /** Set on a Library playlist card that's in [AppSettings.pinnedPlaylists][com.music.bitchord.data.settings.AppSettings.pinnedPlaylists]. */
+    isPinned: Boolean = false,
 ) {
     Column(
-        modifier = Modifier
-            .width(SHELF_CARD_WIDTH)
-            .combinedClickable(onClick = onClick, onLongClick = onLongPress),
+        modifier = modifier.combinedClickable(onClick = onClick, onLongClick = onLongPress),
     ) {
         when (item.browseId) {
             "local:downloads" -> {
+                val palette = remember { MeshPalette(listOf(Color(0xFF1E3C72), Color(0xFF2A5298))) }
                 Box(
                     modifier = Modifier
-                        .width(SHELF_CARD_WIDTH)
+                        .fillMaxWidth()
                         .aspectRatio(1f)
-                        .clip(RoundedCornerShape(SHELF_CARD_CORNER))
-                        .background(MaterialTheme.colorScheme.primaryContainer),
+                        .clip(RoundedCornerShape(SHELF_CARD_CORNER)),
                     contentAlignment = Alignment.Center,
                 ) {
+                    MeshGradientBackground(
+                        palette = palette,
+                        trackKey = "local:downloads",
+                        continuous = true,
+                        blurRadius = 24.dp,
+                    )
                     Icon(
                         imageVector = BitChordIcons.Download,
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                        tint = Color.White,
                         modifier = Modifier.size(40.dp),
                     )
                 }
             }
             "local:all" -> {
+                val palette = remember { MeshPalette(listOf(Color(0xFF134E5E), Color(0xFF71B280))) }
                 Box(
                     modifier = Modifier
-                        .width(SHELF_CARD_WIDTH)
+                        .fillMaxWidth()
                         .aspectRatio(1f)
-                        .clip(RoundedCornerShape(SHELF_CARD_CORNER))
-                        .background(MaterialTheme.colorScheme.secondaryContainer),
+                        .clip(RoundedCornerShape(SHELF_CARD_CORNER)),
                     contentAlignment = Alignment.Center,
                 ) {
+                    MeshGradientBackground(
+                        palette = palette,
+                        trackKey = "local:all",
+                        continuous = true,
+                        blurRadius = 24.dp,
+                    )
                     Icon(
                         imageVector = Icons.Rounded.LibraryMusic,
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                        tint = Color.White,
                         modifier = Modifier.size(40.dp),
                     )
                 }
@@ -383,7 +451,7 @@ private fun ShelfCard(
                     contentDescription = null,
                     contentScale = androidx.compose.ui.layout.ContentScale.Crop,
                     modifier = Modifier
-                        .width(SHELF_CARD_WIDTH)
+                        .fillMaxWidth()
                         .aspectRatio(1f)
                         .clip(RoundedCornerShape(SHELF_CARD_CORNER))
                         .thumbnailBorder(RoundedCornerShape(SHELF_CARD_CORNER))
@@ -392,13 +460,28 @@ private fun ShelfCard(
             }
         }
         Spacer(Modifier.height(10.dp))
-        Text(
-            text = item.title,
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onBackground,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (isPinned) {
+                Icon(
+                    imageVector = BitChordIcons.Pin,
+                    contentDescription = "Pinned",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(14.dp),
+                )
+                Spacer(Modifier.width(4.dp))
+            }
+            Text(
+                text = item.title,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onBackground,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+        }
         Text(
             text = item.subtitle,
             style = MaterialTheme.typography.bodyMedium,

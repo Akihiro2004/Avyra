@@ -1,27 +1,53 @@
 package com.music.bitchord.ui.screens
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyGridState
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.itemsIndexed as gridItemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.music.bitchord.data.YtMusicRepository
 import com.music.bitchord.data.model.HomeShelf
+import com.music.bitchord.R
 import com.music.bitchord.data.model.LibraryPage
 import com.music.bitchord.data.model.ShelfItem
 import com.music.bitchord.data.model.UiState
+import com.music.bitchord.data.settings.AppSettings
+import com.music.bitchord.download.Downloads
+import com.music.bitchord.download.SavedCollection
 import com.music.bitchord.ui.icons.BitChordIcons
 import com.music.bitchord.ui.components.LibraryArtwork
 import com.music.bitchord.ui.components.LibraryIconTile
@@ -29,7 +55,13 @@ import com.music.bitchord.ui.components.LibraryRow
 import com.music.bitchord.ui.components.MessageState
 import com.music.bitchord.ui.components.PAGE_GUTTER
 import com.music.bitchord.ui.components.PullToRefresh
+import com.music.bitchord.ui.components.SHELF_CARD_WIDTH
+import com.music.bitchord.ui.components.libraryGrid
 import com.music.bitchord.ui.components.librarySkeleton
+import com.music.bitchord.ui.player.MeshGradientBackground
+import com.music.bitchord.ui.player.rememberArtworkColors
+import com.music.bitchord.ui.replay.ReplayHeroCard
+import java.util.Locale
 
 /**
  * The signed-in library: the saved collections, as vertical lists.
@@ -70,6 +102,25 @@ fun LibraryScreen(
     onShelfItemClick: (ShelfItem) -> Unit,
     onShelfItemLongPress: (ShelfItem) -> Unit,
     onNewPlaylist: () -> Unit,
+    /**
+     * A shelf's "Show all" — every shelf's row here stops at five cards (see
+     * [LibraryGridShelf]), so this is the only way to reach whatever didn't
+     * fit.
+     */
+    onShowAll: (HomeShelf) -> Unit,
+    /**
+     * The Replay's leading card — minutes listened — or null before anything has
+     * been played.
+     *
+     * Not drawn as a card here. This page is a list of places to go, and a card
+     * is an object to look at; one sitting at the top of it read as the Replay
+     * page's opening reprinted on a page about playlists and downloads. What the
+     * card is used for instead is its *numbers* and its *artwork*: the button
+     * below says what is behind it, and is painted in the colours of the record
+     * that year was mostly spent on.
+     */
+    replayCard: ReplayHeroCard?,
+    onOpenReplay: () -> Unit,
     onSignIn: () -> Unit,
     onRetry: () -> Unit,
     refreshing: Boolean,
@@ -77,7 +128,23 @@ fun LibraryScreen(
     pullState: PullToRefreshState,
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues,
+    /**
+     * The playlists downloaded whole, as cards behind the two device folders.
+     *
+     * They belong on that shelf because they are the same promise everything
+     * else on it makes — here, now, without a network. Nothing is truncated:
+     * the shelf is a row that scrolls, so "all of them" costs nothing.
+     *
+     * Downloaded *albums* are deliberately not here. An album stamps its name
+     * onto each of its tracks, so the Downloads folder's Albums tab groups it
+     * back up on its own and a card here would be a second door onto the same
+     * list. A playlist has no tag anything can derive it from — its tracks are
+     * off forty different releases — so this is the only place it can be reached
+     * without going through that folder.
+     */
+    downloadedPlaylists: List<SavedCollection> = emptyList(),
 ) {
+    val pinnedPlaylists by AppSettings.pinnedPlaylists.collectAsStateWithLifecycle()
     PullToRefresh(
         refreshing = refreshing,
         onRefresh = onRefresh,
@@ -91,7 +158,7 @@ fun LibraryScreen(
         ) {
             item(key = "title") {
                 Text(
-                    text = "Library",
+                    text = stringResource(R.string.library),
                     style = MaterialTheme.typography.displayLarge,
                     color = MaterialTheme.colorScheme.onBackground,
                     modifier = Modifier.padding(horizontal = PAGE_GUTTER, vertical = 8.dp),
@@ -156,6 +223,7 @@ fun LibraryScreen(
                                 onItemClick = onShelfItemClick,
                                 onItemLongPress = onShelfItemLongPress,
                                 onNewPlaylist = onNewPlaylist,
+                                onShowAll = { onShowAll(emptyPlaylists) },
                             )
                         } else {
                             librarySection(shelf = shelf, onItemClick = onShelfItemClick)
@@ -221,6 +289,8 @@ private fun LazyListScope.playlistSection(
     onItemClick: (ShelfItem) -> Unit,
     onItemLongPress: (ShelfItem) -> Unit,
     onNewPlaylist: () -> Unit,
+    onShowAll: () -> Unit,
+    pinnedPlaylists: List<String> = emptyList(),
 ) {
     librarySection(
         shelf = shelf,
@@ -282,3 +352,59 @@ private val PEOPLE = setOf("Artists", "Subscriptions")
  * something rather than continuing it.
  */
 private val SECTION_GAP = 18.dp
+
+/**
+ * One shelf on a page of its own — upstream's "Show all", rendered as a list.
+ *
+ * Kept to upstream's signature, [LazyGridState] included, so the call site does
+ * not have to know which of us is drawing it. A single-column grid *is* a list,
+ * and taking that route rather than swapping in a `LazyColumn` means the state
+ * the caller remembers still belongs to the thing it is scrolling.
+ *
+ * Reachable only in principle from this build: [librarySection] draws every item
+ * a shelf has, so nothing here ever asks to see more. It exists because the
+ * feature is upstream's and the next merge will expect it — a page that is
+ * currently unreachable is cheaper to keep than a merge conflict every release.
+ */
+@Composable
+fun LibraryGridPage(
+    shelf: HomeShelf,
+    gridState: LazyGridState,
+    onItemClick: (ShelfItem) -> Unit,
+    onItemLongPress: (ShelfItem) -> Unit,
+    contentPadding: PaddingValues,
+    modifier: Modifier = Modifier,
+    onNewPlaylist: (() -> Unit)? = null,
+) {
+    LazyVerticalGrid(
+        columns = GridCells.Fixed(1),
+        state = gridState,
+        modifier = modifier.fillMaxSize(),
+        contentPadding = contentPadding,
+    ) {
+        onNewPlaylist?.let { create ->
+            item(key = "lead:new") {
+                LibraryRow(
+                    title = "New playlist",
+                    subtitle = "Saved to YouTube Music",
+                    onClick = create,
+                    showDivider = shelf.items.isNotEmpty(),
+                ) { LibraryIconTile(icon = BitChordIcons.Plus) }
+            }
+        }
+        gridItemsIndexed(
+            items = shelf.items,
+            key = { index, item -> "row:${item.browseId ?: item.videoId ?: item.title}:$index" },
+        ) { index, item ->
+            LibraryRow(
+                title = item.title,
+                subtitle = item.subtitle,
+                onClick = { onItemClick(item) },
+                onLongPress = { onItemLongPress(item) },
+                showDivider = index < shelf.items.lastIndex,
+            ) {
+                SectionLeading(item = item, circular = shelf.title in PEOPLE)
+            }
+        }
+    }
+}

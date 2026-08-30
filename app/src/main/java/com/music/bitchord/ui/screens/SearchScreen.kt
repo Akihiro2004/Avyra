@@ -1,8 +1,10 @@
 package com.music.bitchord.ui.screens
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -44,6 +46,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -58,12 +61,16 @@ import com.music.bitchord.data.model.artworkAt
 import com.music.bitchord.data.model.SearchResult
 import com.music.bitchord.data.model.Song
 import com.music.bitchord.data.model.UiState
+import com.music.bitchord.R
 import com.music.bitchord.ui.components.MessageState
 import com.music.bitchord.ui.components.PAGE_GUTTER
 import com.music.bitchord.ui.components.ROW_DIVIDER_INSET
 import com.music.bitchord.ui.components.SongRow
 import com.music.bitchord.ui.components.thumbnailBorder
 import com.music.bitchord.ui.components.songListSkeleton
+import com.music.bitchord.ui.haptics.Haptic
+import com.music.bitchord.ui.haptics.rememberHaptics
+import java.util.Locale
 
 @Composable
 fun SearchScreen(
@@ -78,6 +85,12 @@ fun SearchScreen(
     onSongLongPress: (Song) -> Unit,
     onSongSwipe: (Song) -> Unit,
     onBrowseClick: (BrowseItem) -> Unit,
+    /**
+     * Holding an album or playlist hit rather than tapping it — the same menu
+     * the shelves open, so a release found by searching can go on the queue
+     * without a trip through its page.
+     */
+    onBrowseLongPress: ((BrowseItem) -> Unit)? = null,
     history: List<String>,
     suggestions: List<String>,
     onSubmit: () -> Unit,
@@ -137,7 +150,7 @@ fun SearchScreen(
                     onFill = onQueryChange,
                 )
                 results == null -> if (history.isEmpty()) {
-                    item { MessageState("Search millions of songs on YouTube Music.") }
+                    item { MessageState(stringResource(R.string.search_empty)) }
                 } else {
                     recentSearches(history, onHistoryClick, onHistoryRemove, onHistoryClear)
                 }
@@ -161,6 +174,7 @@ fun SearchScreen(
                             is SearchResult.Browse -> BrowseRow(
                                 item = row.item,
                                 onClick = { onBrowseClick(row.item) },
+                                onLongPress = onBrowseLongPress?.let { { it(row.item) } },
                             )
                         }
                         if (index < results.data.lastIndex) {
@@ -242,7 +256,7 @@ private fun SuggestionRow(term: String, onFill: (() -> Unit)?, onClick: () -> Un
             ) {
                 Icon(
                     Icons.Rounded.NorthWest,
-                    contentDescription = "Edit \"$term\"",
+                    contentDescription = stringResource(R.string.recent_search_edit, term),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(18.dp),
                 )
@@ -274,13 +288,13 @@ private fun LazyListScope.recentSearches(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = "Recent searches",
+                text = stringResource(R.string.recent_searches),
                 style = MaterialTheme.typography.headlineMedium,
                 color = MaterialTheme.colorScheme.onBackground,
                 modifier = Modifier.weight(1f),
             )
             Text(
-                text = "Clear",
+                text = stringResource(R.string.clear),
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier
@@ -332,7 +346,7 @@ private fun RecentSearchRow(term: String, onClick: () -> Unit, onRemove: () -> U
         ) {
             Icon(
                 Icons.Rounded.Close,
-                contentDescription = "Remove \"$term\" from recent searches",
+                contentDescription = stringResource(R.string.recent_search_remove, term),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(18.dp),
             )
@@ -340,12 +354,13 @@ private fun RecentSearchRow(term: String, onClick: () -> Unit, onRemove: () -> U
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun BrowseRow(item: BrowseItem, onClick: () -> Unit) {
+private fun BrowseRow(item: BrowseItem, onClick: () -> Unit, onLongPress: (() -> Unit)? = null) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .combinedClickable(onClick = onClick, onLongClick = onLongPress)
             .padding(horizontal = PAGE_GUTTER, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -374,7 +389,7 @@ private fun BrowseRow(item: BrowseItem, onClick: () -> Unit) {
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = item.subtitle.ifBlank { item.type.name.lowercase().replaceFirstChar { it.uppercase() } },
+                text = item.subtitle.ifBlank { item.type.name.lowercase(Locale.ROOT).replaceFirstChar { it.uppercase(Locale.ROOT) } },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
@@ -391,6 +406,7 @@ private fun BrowseRow(item: BrowseItem, onClick: () -> Unit) {
  */
 @Composable
 private fun SearchFilterTabs(filter: SearchFilter, onFilterChange: (SearchFilter) -> Unit) {
+    val haptics = rememberHaptics()
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -408,8 +424,14 @@ private fun SearchFilterTabs(filter: SearchFilter, onFilterChange: (SearchFilter
                         if (selected) MaterialTheme.colorScheme.primaryContainer
                         else MaterialTheme.colorScheme.surfaceVariant,
                     )
-                    .clickable { onFilterChange(entry) }
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                    // Only the pill that isn't already selected has anything to
+                    // report — re-tapping the current filter changes nothing, so
+                    // buzzing for it would be feedback for a no-op.
+                    .clickable {
+                        if (!selected) haptics.play(Haptic.Select)
+                        onFilterChange(entry)
+                    }
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
             ) {
                 Text(
                     text = entry.label,
@@ -461,7 +483,7 @@ private fun SearchField(
         // decorative would mean the keyboard's own key was the single way in.
         Icon(
             Icons.Rounded.Search,
-            contentDescription = "Search",
+            contentDescription = stringResource(R.string.search),
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier
                 .size(32.dp)
@@ -473,7 +495,7 @@ private fun SearchField(
         Box(Modifier.weight(1f)) {
             if (query.isEmpty()) {
                 Text(
-                    text = "Search artists, songs, lyrics, and more",
+                    text = stringResource(R.string.search_hint),
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -508,7 +530,7 @@ private fun SearchField(
             ) {
                 Icon(
                     Icons.Rounded.Close,
-                    contentDescription = "Clear search",
+                    contentDescription = stringResource(R.string.clear_search),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(18.dp),
                 )
