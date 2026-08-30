@@ -154,13 +154,23 @@ object Downloads {
      *
      * Touches the filesystem, so call it off the main thread.
      */
-    suspend fun savedUri(context: Context, videoId: String): Uri? = withContext(Dispatchers.IO) {
-        val recorded = _saved.value[videoId] ?: return@withContext null
-        val uri = recorded.toUri()
-        if (DownloadStore.exists(context, uri)) return@withContext uri
-        Log.d(TAG, "$videoId was downloaded but the file is gone; forgetting it")
-        forget(videoId)
-        null
+    suspend fun savedUri(context: Context, videoId: String): Uri? {
+        // The lookup happens before the dispatch, not after it. This is called
+        // from ExoPlayer's loader thread inside a `runBlocking` on the way to
+        // every single stream resolve, and for anything that was never
+        // downloaded the answer is "no" without the filesystem being touched at
+        // all — so hopping to an IO thread to find that out was a context
+        // switch bought for nothing, on the one path that is holding up the
+        // audio. Only a track the record actually names gets the hop, and that
+        // one has a file to stat.
+        val recorded = _saved.value[videoId] ?: return null
+        return withContext(Dispatchers.IO) {
+            val uri = recorded.toUri()
+            if (DownloadStore.exists(context, uri)) return@withContext uri
+            Log.d(TAG, "$videoId was downloaded but the file is gone; forgetting it")
+            forget(videoId)
+            null
+        }
     }
 
     /** Delete the file saved for [videoId] and forget it. */

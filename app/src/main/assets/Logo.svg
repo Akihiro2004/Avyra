@@ -1,8 +1,8 @@
 <svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <linearGradient id="avyra" x1="96" y1="96" x2="928" y2="928" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#7057FF"/>
-      <stop offset="1" stop-color="#35E2C1"/>
+      <stop stop-color="#0A84FF"/>
+      <stop offset="1" stop-color="#5AC8FA"/>
     </linearGradient>
   </defs>
   <rect width="1024" height="1024" rx="224" fill="url(#avyra)"/>

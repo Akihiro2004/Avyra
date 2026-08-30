@@ -5,11 +5,15 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.PlaylistAdd
 import androidx.compose.material.icons.rounded.PlaylistPlay
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.SwipeToDismissBoxState
@@ -89,6 +93,22 @@ val ROW_DIVIDER_INSET = PAGE_GUTTER + 68.dp
  * showing: enough to say the row scrolls without a card being half a card.
  */
 val SHELF_CARD_WIDTH = 158.dp
+
+/**
+ * How hard a card's artwork is rounded.
+ *
+ * Sized as a fraction of the card rather than picked as a number that looked
+ * right on its own, which is what keeps a 158dp shelf card and a near-page-width
+ * hero card reading as the same object at two sizes. Both land near 7%, where a
+ * cover still reads as a printed square with its corners taken off. Rounded much
+ * further — the 20 and 26dp these were — and a sleeve stops looking like a
+ * sleeve and starts looking like an app icon, which is the one thing an album
+ * cover should never be mistaken for.
+ */
+val SHELF_CARD_CORNER = 12.dp
+
+/** The lead card on Home and Discover — see [SHELF_CARD_CORNER]. */
+val HERO_CARD_CORNER = 16.dp
 
 /**
  * One track row, used by search, library and detail pages.
@@ -356,6 +376,157 @@ fun SignInBanner(onSignIn: () -> Unit, modifier: Modifier = Modifier) {
         }
         Spacer(Modifier.width(12.dp))
         Button(onClick = onSignIn) { Text("Sign in") }
+    }
+}
+
+/**
+ * Artwork size on a list row, and the corner it is cut with.
+ *
+ * A shade larger than [SongRow]'s 52dp and cut a shade tighter. Both are
+ * deliberate: a library row is a *destination* rather than one of forty tracks,
+ * so it can afford the extra couple of pixels, and a release's cover is a square
+ * image — rounding it hard enough to read as a "card" is what makes a list of
+ * them look like a settings screen instead of a shelf of records.
+ *
+ * [LIST_ROW_ART] + the 14dp gap after it comes to exactly [ROW_DIVIDER_INSET],
+ * which is what lets a library list and a track list share a left edge.
+ */
+val LIST_ROW_ART = 54.dp
+private val LIST_ROW_CORNER = 10.dp
+
+/**
+ * One row of a library list: artwork, two lines, and a chevron.
+ *
+ * This is the counterpart to the carousels on Home and Discover, and the split
+ * between them is the whole point rather than a matter of taste. A carousel is
+ * for things the listener has not chosen — it trades completeness for size,
+ * showing six covers large and the rest off-screen, which is right when the
+ * question is "does any of this appeal to me". A library is the opposite
+ * question: the listener knows what is in it and wants the one they came for.
+ * Sideways scrolling answers that badly — it hides most of the contents, gives
+ * no sense of how many there are, and makes reaching the twentieth item a
+ * gesture rather than a glance.
+ *
+ * So the same data gets a different shape here: everything visible at once,
+ * scanned vertically, with the artwork small enough that a screenful is a dozen
+ * rows rather than two and a half cards.
+ *
+ * [leading] is a slot rather than a set of artwork parameters because the three
+ * things that appear there — a cover, a circular portrait, a tinted icon tile —
+ * have nothing in common beyond their size. See [LibraryArtwork] and
+ * [LibraryIconTile].
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun LibraryRow(
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    onLongPress: (() -> Unit)? = null,
+    /**
+     * Off for the last row of a section, where the gap before the next heading
+     * already separates it. A divider there would read as the start of
+     * something rather than the end of it.
+     */
+    showDivider: Boolean = true,
+    leading: @Composable () -> Unit,
+) {
+    Column(modifier) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .combinedClickable(onClick = onClick, onLongClick = onLongPress)
+                .padding(horizontal = PAGE_GUTTER, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            leading()
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onBackground,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (subtitle.isNotBlank()) {
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            Spacer(Modifier.width(8.dp))
+            // Dimmer than the subtitle it sits beside. It is a statement that
+            // the row opens something, not a control of its own — at full
+            // strength a column of them reads as a column of buttons.
+            Icon(
+                Icons.Rounded.ChevronRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
+                modifier = Modifier.size(20.dp),
+            )
+        }
+        if (showDivider) {
+            HorizontalDivider(
+                modifier = Modifier.padding(start = ROW_DIVIDER_INSET),
+                // A hairline, not a rule: at 1dp on a dense screen this is a
+                // seam between rows rather than a line drawn under one.
+                thickness = 0.5.dp,
+                color = MaterialTheme.colorScheme.outlineVariant,
+            )
+        }
+    }
+}
+
+/** A release's cover, or an artist's portrait — see [circular]. */
+@Composable
+fun LibraryArtwork(url: String?, circular: Boolean = false) {
+    val shape = if (circular) CircleShape else RoundedCornerShape(LIST_ROW_CORNER)
+    AsyncImage(
+        model = url.artworkAt(ROW_ART_PX),
+        contentDescription = null,
+        contentScale = ContentScale.Crop,
+        modifier = Modifier
+            .size(LIST_ROW_ART)
+            .clip(shape)
+            .thumbnailBorder(shape)
+            .background(MaterialTheme.colorScheme.surfaceVariant),
+    )
+}
+
+/**
+ * The stand-in for a row that has no artwork because the thing behind it isn't
+ * a release — Downloads, Local Music, a playlist with nothing in it yet.
+ *
+ * A tinted tile rather than a grey square with an icon on it: at this size the
+ * colour is what separates the two on-device rows from each other at a glance,
+ * which is otherwise the job of two very similar glyphs.
+ */
+@Composable
+fun LibraryIconTile(
+    icon: ImageVector,
+    container: Color = MaterialTheme.colorScheme.primaryContainer,
+    tint: Color = MaterialTheme.colorScheme.onPrimaryContainer,
+) {
+    Box(
+        modifier = Modifier
+            .size(LIST_ROW_ART)
+            .clip(RoundedCornerShape(LIST_ROW_CORNER))
+            .background(container),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = tint,
+            modifier = Modifier.size(26.dp),
+        )
     }
 }
 

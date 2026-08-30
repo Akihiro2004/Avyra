@@ -154,7 +154,18 @@ fun FrostedTopBar(
                     Image(
                         painter = painterResource(R.drawable.ic_logo),
                         contentDescription = null,
-                        colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.primary),
+                        // Solid, not accented. The mark is a signature rather
+                        // than a control, and tinting it with the accent put the
+                        // brightest colour in the interface on the one thing in
+                        // the bar that cannot be tapped — which drew the eye to
+                        // the corner and away from the page. Monochrome, it
+                        // reads as letterhead and gets out of the way.
+                        //
+                        // `onBackground` rather than a literal white so the mark
+                        // survives the light theme, where white on white is no
+                        // mark at all. In dark — which is what the app opens on
+                        // — this *is* white.
+                        colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onBackground),
                         modifier = Modifier.size(24.dp),
                     )
                 }

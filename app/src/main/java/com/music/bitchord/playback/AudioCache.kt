@@ -142,6 +142,21 @@ object AudioCache {
      */
     private const val PREFETCH_DELAY_MS = 8_000L
 
+    /**
+     * The same grace period, for the half of read-ahead that fetches no audio.
+     *
+     * [PREFETCH_DELAY_MS] is sized against megabytes: whole tracks pulled down
+     * while the listener is still waiting on the first note of the one in front
+     * of them. Warming a stream *URL* is not that. It is a small POST and a
+     * range request that reads sixteen kilobytes and is dropped — a rounding
+     * error against the two-megabyte chunks the player is pulling — and it buys
+     * the thing eight seconds of silence is worst at covering: a skip made
+     * inside the first eight seconds, which is most of them while someone is
+     * browsing. Held back far enough to stay out of the player's opening burst,
+     * and no further.
+     */
+    private const val URL_PREFETCH_DELAY_MS = 2_500L
+
     /** How long to leave the player alone with an entry before trying again. */
     private const val RETRY_DELAY_MS = 5_000L
 
@@ -482,7 +497,7 @@ object AudioCache {
                     }
                 }
                 launch {
-                    delay(PREFETCH_DELAY_MS)
+                    delay(URL_PREFETCH_DELAY_MS)
                     for (id in videoIds.take(QUEUE_LOOKAHEAD + 1).let { if (cacheBytes) it.drop(1) else it }) {
                         runCatching { StreamResolver.resolve(id) }
                             .onFailure { TrackLog.d(TAG, "queue warm-up skipped $id: ${it.message}", about = id) }

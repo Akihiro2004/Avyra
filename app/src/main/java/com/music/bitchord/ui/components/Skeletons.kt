@@ -162,7 +162,7 @@ private fun HeroShelfSkeleton() {
             items(2) {
                 ShimmerBox(
                     modifier = Modifier.fillParentMaxWidth(0.82f).aspectRatio(0.92f),
-                    shape = RoundedCornerShape(18.dp),
+                    shape = RoundedCornerShape(HERO_CARD_CORNER),
                 )
             }
         }
@@ -208,11 +208,52 @@ fun LazyListScope.feedMoreSkeleton() {
     item(key = "skeleton:more") { ShelfSkeleton() }
 }
 
-/** The signed-in library: saved collections, then the run of liked tracks. */
+/**
+ * Stands in for one [LibraryRow][com.music.bitchord.ui.components.LibraryRow],
+ * down to the 54dp of artwork and the space the chevron keeps clear on the
+ * right — so the rows don't shift sideways when the real ones land.
+ */
+@Composable
+private fun LibraryRowSkeleton(index: Int = 0, circular: Boolean = false) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = PAGE_GUTTER, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        ShimmerBox(
+            Modifier.size(LIST_ROW_ART),
+            if (circular) CircleShape else RoundedCornerShape(10.dp),
+        )
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            SkeletonLine(fraction = TitleWidths[index % TitleWidths.size], height = 14.dp)
+            Spacer(Modifier.height(7.dp))
+            SkeletonLine(fraction = SubtitleWidths[index % SubtitleWidths.size], height = 11.dp)
+        }
+        // The chevron's 20dp plus the 8dp before it. Left blank rather than
+        // drawn: a shimmering chevron would be the one placeholder on the page
+        // standing in for something that never loads.
+        Spacer(Modifier.width(28.dp))
+    }
+}
+
+/**
+ * The signed-in library while its saved collections are on the wire.
+ *
+ * Two sections rather than one, the second circular, because that is the shape
+ * the page almost always lands in — playlists or albums, then artists — and a
+ * skeleton that guesses the *structure* right is worth more than one that
+ * guesses the row count right.
+ */
 fun LazyListScope.librarySkeleton() {
-    item(key = "skeleton:library:shelf") { ShelfSkeleton() }
     item(key = "skeleton:library:header") { SectionHeaderSkeleton(index = 1) }
-    songListSkeleton(count = 7, keyPrefix = "skeleton:library:song")
+    items(5, key = { "skeleton:library:row:$it" }) { index -> LibraryRowSkeleton(index) }
+    item(key = "skeleton:library:gap") { Spacer(Modifier.height(18.dp)) }
+    item(key = "skeleton:library:header2") { SectionHeaderSkeleton(index = 2) }
+    items(3, key = { "skeleton:library:row2:$it" }) { index ->
+        LibraryRowSkeleton(index = index + 1, circular = true)
+    }
 }
 
 /** The Play / Shuffle pair, which only appears once there is something to play. */

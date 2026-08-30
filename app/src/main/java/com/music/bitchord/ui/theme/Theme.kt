@@ -19,51 +19,82 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 
-/** Avyra's core violet. It is intentionally unrelated to Spotify green or Apple Music red. */
-val AvyraViolet = Color(0xFF7057FF)
-val AvyraAqua = Color(0xFF35E2C1)
-val AvyraCoral = Color(0xFFFF7A90)
+/**
+ * Avyra's accent, and the two colours allowed to sit beside it.
+ *
+ * A single vivid blue carries the whole interface: it is the only saturated
+ * thing on screen that isn't album art, which is what makes a tapped control
+ * read as tapped without any of the surfaces needing to be tinted. The neutrals
+ * below are mixed *towards* it rather than being pure grey — a faint cool cast,
+ * far too slight to read as blue on its own, but enough that the accent looks
+ * like it belongs to the surface rather than being dropped onto it.
+ *
+ * [AvyraCyan] and [AvyraPink] are deliberately close relatives rather than
+ * contrasts. They exist for the handful of places Material insists on a
+ * secondary and a tertiary, and the palette is at its best when neither is
+ * especially visible.
+ */
+val AvyraBlue = Color(0xFF0A84FF)
+val AvyraCyan = Color(0xFF5AC8FA)
+val AvyraPink = Color(0xFFFF6482)
 
+/*
+ * The dark scheme is the one the app is designed in — it opens on it, and the
+ * player fills the screen with artwork whichever theme is set.
+ *
+ * The background is near-black rather than the charcoal Material reaches for by
+ * default, because every surface above it is a card and every card wants an
+ * edge. On OLED it is also simply off, which is worth having for an app people
+ * leave on a lock screen.
+ */
 private val DarkColors = darkColorScheme(
-    primary = AvyraViolet,
+    primary = AvyraBlue,
     onPrimary = Color.White,
-    primaryContainer = Color(0xFF292050),
-    onPrimaryContainer = Color(0xFFE7E1FF),
-    secondary = AvyraAqua,
-    onSecondary = Color(0xFF00251E),
-    secondaryContainer = Color(0xFF123D37),
-    onSecondaryContainer = Color(0xFFB7F6E8),
-    tertiary = AvyraCoral,
-    onTertiary = Color(0xFF3B0712),
-    background = Color(0xFF080A12),
-    onBackground = Color(0xFFF2F3FA),
-    surface = Color(0xFF111522),
-    onSurface = Color(0xFFF2F3FA),
-    surfaceVariant = Color(0xFF1A2030),
-    onSurfaceVariant = Color(0xFFA9B0C3),
-    outline = Color(0xFF30384D),
-    outlineVariant = Color(0xFF242B3C),
+    primaryContainer = Color(0xFF10294A),
+    onPrimaryContainer = Color(0xFFCFE4FF),
+    secondary = AvyraCyan,
+    onSecondary = Color(0xFF00212E),
+    secondaryContainer = Color(0xFF10333F),
+    onSecondaryContainer = Color(0xFFBFE9FA),
+    tertiary = AvyraPink,
+    onTertiary = Color(0xFF3D0716),
+    background = Color(0xFF05070B),
+    onBackground = Color(0xFFF5F6F8),
+    surface = Color(0xFF121418),
+    onSurface = Color(0xFFF5F6F8),
+    surfaceVariant = Color(0xFF1C1F26),
+    onSurfaceVariant = Color(0xFF9BA1AD),
+    // Bright enough to draw a hairline that survives a phone at half
+    // brightness, dim enough that a list of them doesn't read as a grid.
+    outline = Color(0xFF2E323C),
+    outlineVariant = Color(0xFF23262E),
 )
 
+/*
+ * Light is the same palette with the stack inverted: the page is the tinted
+ * grey and the cards are white, rather than the other way round. That is what
+ * keeps artwork sitting *on* the page in both themes instead of being punched
+ * out of it in one and floating in the other.
+ */
 private val LightColors = lightColorScheme(
-    primary = Color(0xFF5940EA),
+    primary = Color(0xFF007AFF),
     onPrimary = Color.White,
-    primaryContainer = Color(0xFFE8E3FF),
-    onPrimaryContainer = Color(0xFF211269),
-    secondary = Color(0xFF007F6C),
+    primaryContainer = Color(0xFFD8E9FF),
+    onPrimaryContainer = Color(0xFF00294D),
+    secondary = Color(0xFF0B7FA8),
     onSecondary = Color.White,
-    secondaryContainer = Color(0xFFC6F3E8),
-    onSecondaryContainer = Color(0xFF00382F),
-    tertiary = Color(0xFFB83356),
+    secondaryContainer = Color(0xFFC7E9F7),
+    onSecondaryContainer = Color(0xFF00323F),
+    tertiary = Color(0xFFD6335A),
     onTertiary = Color.White,
-    background = Color(0xFFF7F8FC),
-    onBackground = Color(0xFF10121B),
+    background = Color(0xFFF5F6FA),
+    onBackground = Color(0xFF0A0C10),
     surface = Color(0xFFFFFFFF),
-    onSurface = Color(0xFF10121B),
-    surfaceVariant = Color(0xFFECEFFA),
-    onSurfaceVariant = Color(0xFF5E6577),
-    outline = Color(0xFFD1D6E4),
-    outlineVariant = Color(0xFFE1E5EF),
+    onSurface = Color(0xFF0A0C10),
+    surfaceVariant = Color(0xFFEBEDF3),
+    onSurfaceVariant = Color(0xFF62666F),
+    outline = Color(0xFFD3D6DE),
+    outlineVariant = Color(0xFFE4E7EE),
 )
 
 /*

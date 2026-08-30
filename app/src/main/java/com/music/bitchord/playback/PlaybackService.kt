@@ -631,6 +631,10 @@ class PlaybackService : MediaSessionService() {
         // read as a track change and set the read-ahead going.
         restoreLastQueue(exoPlayer)
 
+        // And the player JavaScript the first resolve would otherwise download
+        // in silence — see [warmResolver].
+        warmResolver(exoPlayer)
+
         // History pings fire once a track is actually audible — both when
         // playback starts and when the queue moves on while already playing.
         exoPlayer.addListener(playbackListener)
@@ -925,6 +929,33 @@ class PlaybackService : MediaSessionService() {
             last.index,
             last.positionMs,
         )
+    }
+
+    /**
+     * Gets the once-per-process half of a resolve out of the way before a
+     * listener is waiting on it — see [StreamResolver.warmUp].
+     *
+     * Deliberately *not* a resolve, which is the thing [restoreLastQueue]
+     * documents itself for refusing to do: no stream is looked up, no
+     * notification is posted, and the player stays idle. What is fetched is the
+     * player JavaScript every YouTube stream URL needs untangling with, which is
+     * shared by every track in the session and is currently charged in full to
+     * whichever one is played first.
+     *
+     * The track comes off the restored queue rather than a constant, and there
+     * is nothing to do without one. A first-ever launch, a queue left on a
+     * source-backed or local track, or a queue whose top item names no video —
+     * all of them fall out here having spent nothing, which is the same test the
+     * resolving data source applies before it reaches YouTube at all.
+     */
+    private fun warmResolver(player: ExoPlayer) {
+        val videoId = player.currentMediaItem
+            ?.localConfiguration?.uri
+            ?.getQueryParameter("v")
+            ?: return
+        scope.launch(Dispatchers.IO + TrackLog.about(videoId)) {
+            StreamResolver.warmUp(videoId)
+        }
     }
 
     /** The background hunt for a better copy of whatever is playing. */

@@ -52,8 +52,10 @@ import com.music.bitchord.data.model.HomeShelf
 import com.music.bitchord.data.model.ShelfItem
 import com.music.bitchord.data.model.UiState
 import com.music.bitchord.data.model.artworkAt
+import com.music.bitchord.ui.components.HERO_CARD_CORNER
 import com.music.bitchord.ui.components.MessageState
 import com.music.bitchord.ui.components.PAGE_GUTTER
+import com.music.bitchord.ui.components.SHELF_CARD_CORNER
 import com.music.bitchord.ui.components.PullToRefresh
 import com.music.bitchord.ui.components.SHELF_CARD_WIDTH
 import com.music.bitchord.ui.components.SignInBanner
@@ -203,8 +205,8 @@ private fun HeroCard(item: ShelfItem, onClick: () -> Unit, modifier: Modifier = 
     Box(
         modifier = modifier
             .aspectRatio(1.42f)
-            .clip(RoundedCornerShape(26.dp))
-            .thumbnailBorder(RoundedCornerShape(26.dp))
+            .clip(RoundedCornerShape(HERO_CARD_CORNER))
+            .thumbnailBorder(RoundedCornerShape(HERO_CARD_CORNER))
             .background(MaterialTheme.colorScheme.surfaceVariant)
             .clickable(onClick = onClick),
     ) {
@@ -299,7 +301,7 @@ internal fun NewShelfCard(
             modifier = Modifier
                 .width(SHELF_CARD_WIDTH)
                 .aspectRatio(1f)
-                .clip(RoundedCornerShape(20.dp))
+                .clip(RoundedCornerShape(SHELF_CARD_CORNER))
                 .background(MaterialTheme.colorScheme.surfaceVariant),
             contentAlignment = Alignment.Center,
         ) {
@@ -346,7 +348,7 @@ private fun ShelfCard(
                     modifier = Modifier
                         .width(SHELF_CARD_WIDTH)
                         .aspectRatio(1f)
-                        .clip(RoundedCornerShape(20.dp))
+                        .clip(RoundedCornerShape(SHELF_CARD_CORNER))
                         .background(MaterialTheme.colorScheme.primaryContainer),
                     contentAlignment = Alignment.Center,
                 ) {
@@ -363,7 +365,7 @@ private fun ShelfCard(
                     modifier = Modifier
                         .width(SHELF_CARD_WIDTH)
                         .aspectRatio(1f)
-                        .clip(RoundedCornerShape(20.dp))
+                        .clip(RoundedCornerShape(SHELF_CARD_CORNER))
                         .background(MaterialTheme.colorScheme.secondaryContainer),
                     contentAlignment = Alignment.Center,
                 ) {
@@ -383,8 +385,8 @@ private fun ShelfCard(
                     modifier = Modifier
                         .width(SHELF_CARD_WIDTH)
                         .aspectRatio(1f)
-                        .clip(RoundedCornerShape(20.dp))
-                        .thumbnailBorder(RoundedCornerShape(20.dp))
+                        .clip(RoundedCornerShape(SHELF_CARD_CORNER))
+                        .thumbnailBorder(RoundedCornerShape(SHELF_CARD_CORNER))
                         .background(MaterialTheme.colorScheme.surfaceVariant),
                 )
             }

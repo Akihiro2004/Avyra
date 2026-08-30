@@ -91,11 +91,8 @@ import coil3.SingletonImageLoader
 import coil3.compose.AsyncImage
 import com.music.bitchord.ui.components.thumbnailBorder
 import com.music.bitchord.data.model.Account
-import com.music.bitchord.BuildConfig
 import com.music.bitchord.data.scrobbling.LastFM
 import com.music.bitchord.data.settings.AppSettings
-import com.music.bitchord.data.sources.SourceKind
-import com.music.bitchord.data.sources.SourceRegistry
 import com.music.bitchord.data.settings.AudioQuality
 import com.music.bitchord.data.settings.ThemeMode
 import com.music.bitchord.playback.AudioCache
@@ -145,16 +142,9 @@ fun SettingsScreen(
     val theme by AppSettings.themeMode.collectAsStateWithLifecycle()
     val sessionId by AppSettings.audioSessionId.collectAsStateWithLifecycle()
     val cacheLimitBytes by AppSettings.audioCacheLimitBytes.collectAsStateWithLifecycle()
-    val sourceConfigs by SourceRegistry.configs.collectAsStateWithLifecycle()
-    val lossless by AppSettings.losslessAudio.collectAsStateWithLifecycle()
     val stopOnTaskRemoved by AppSettings.stopOnTaskRemoved.collectAsStateWithLifecycle()
     val hideVolumeBar by AppSettings.hideVolumeBar.collectAsStateWithLifecycle()
     val swipeToPlayNext by AppSettings.swipeToPlayNext.collectAsStateWithLifecycle()
-
-    // Whether the module index URL is baked into this build.
-    val losslessConfigured = BuildConfig.MODULE_INDEX_URL.trim().isNotEmpty()
-    // Whether the module source is currently enabled (toggle state).
-    val moduleEnabled = sourceConfigs.any { it.kind == SourceKind.MODULE && it.enabled && it.isComplete }
 
     // Scrobbling states
     val lastfmEnabled by AppSettings.lastfmEnabled.collectAsStateWithLifecycle()
@@ -210,52 +200,33 @@ fun SettingsScreen(
             )
         }
 
+        /*
+         * No lossless row here any more.
+         *
+         * What it actually switched was the *module source*, not a quality
+         * preference — [SourceRegistry.setModuleEnabled] — and it was the only
+         * control in the app that did, since `SourcesScreen` is written but
+         * never routed to. Removing it therefore leaves the module source
+         * pinned at whatever it was last set to, which for a build carrying a
+         * `MODULE_INDEX_URL` is on: lossless keeps working, and nothing in the
+         * resolve path changed. `AppSettings.losslessAudio` is untouched and
+         * still defaults to true, so [SourceResolver.requestForNow] still asks
+         * for lossless.
+         *
+         * The thing that is genuinely gone is the way *out*: a listener whose
+         * module serves the wrong cut of a song can no longer turn the source
+         * off, which is what that row's own subtitle told them to do. If that
+         * turns out to matter, the right home for it is the Sources screen
+         * rather than a row in Audio quality — it is a question about which
+         * catalogues to trust, not about bitrate.
+         */
         SettingsGroup(
             header = "Audio quality",
             footer = "Each connection keeps its own ceiling, so Wi-Fi can stay on " +
                 "High while mobile data is capped. High costs about " +
-                "${AudioQuality.HIGH.hourly} of data. The ceiling applies to every " +
-                "source, and outranks the lossless preference.",
+                "${AudioQuality.HIGH.hourly} of data. The ceiling applies to " +
+                "every source.",
         ) {
-            SettingsRow(
-                icon = Icons.Rounded.GraphicEq,
-                title = "Lossless / HQ Audio",
-                subtitle = if (!losslessConfigured) null else
-                    if (moduleEnabled) "Turn off if its playing a different version of the song or another song. Restart Required!"
-                    else "Turn on to experience lossless music quality. Restart Required!",
-                subtitleContent = if (!losslessConfigured) {
-                    {
-                        Text(
-                            text = "Lossless source is not configured in this build",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.error,
-                        )
-                    }
-                } else null,
-                trailing = {
-                    Switch(
-                        checked = moduleEnabled && losslessConfigured,
-                        onCheckedChange = {
-                            if (losslessConfigured) {
-                                SourceRegistry.setModuleEnabled(it)
-                                AudioCache.clear {}
-                            }
-                        },
-                        enabled = losslessConfigured,
-                        colors = SwitchDefaults.colors(
-                            checkedTrackColor = MaterialTheme.colorScheme.primary,
-                            checkedBorderColor = MaterialTheme.colorScheme.primary,
-                        ),
-                    )
-                },
-                onClick = {
-                    if (losslessConfigured) {
-                        SourceRegistry.setModuleEnabled(!moduleEnabled)
-                        AudioCache.clear {}
-                    }
-                },
-            )
-            RowDivider()
             SettingsRow(
                 icon = Icons.Rounded.Wifi,
                 title = "On Wi-Fi",
@@ -292,7 +263,7 @@ fun SettingsScreen(
             }
             SettingsRow(
                 icon = Icons.Rounded.AutoAwesome,
-                title = "Automix [BETA]",
+                title = "Automix",
                 subtitle = if (smartFade) {
                     "Blends every transition, timed automatically from each track. Turn off if facing overheating or lag."
                 } else {

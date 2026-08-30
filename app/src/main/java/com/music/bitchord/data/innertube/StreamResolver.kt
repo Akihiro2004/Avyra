@@ -316,6 +316,58 @@ object StreamResolver {
     }
 
     /**
+     * Fetches and parses YouTube's player JavaScript before anything is waiting
+     * on it.
+     *
+     * Every googlevideo URL this app plays carries an `n` parameter, and
+     * untangling one means running YouTube's own player code — which NewPipe has
+     * to download (`base.js`, a couple of megabytes) and Rhino has to compile
+     * before it can run anything at all. That is a once-per-process cost, and
+     * until this existed it was paid inside [deobfuscate] for whichever track the
+     * listener played first: on the critical path, in silence, with every other
+     * resolve queued behind [jsPlayerMutex]. Every track after it reaches the
+     * same code in single-digit milliseconds, which is exactly why the first one
+     * felt so different from the rest.
+     *
+     * So it is paid up front instead, off the critical path, by a session that
+     * has a queue to resume — which is the session about to press play. See
+     * `PlaybackService.warmResolver`.
+     *
+     * [Innertube.ensureVisitorData] rides along for the same reason: one more
+     * round trip that only the first resolve of a process ever pays.
+     *
+     * [YoutubeJavaScriptPlayerManager.getSignatureTimestamp] is the call used
+     * rather than the throttling transform itself, because it pulls the same
+     * player code without putting a synthetic URL through the `n` function —
+     * and it is the *download* that costs seconds. Parsing the `n` function out
+     * of code already in hand is milliseconds, and is left where it was rather
+     * than risk caching a parse failure provoked by a made-up URL (see
+     * [jsPlayerMutex] for why a cached failure is load-bearing here).
+     *
+     * Nothing waits on this and nothing depends on it succeeding: a warm-up that
+     * fails leaves the first resolve to do exactly what it does today.
+     */
+    suspend fun warmUp(videoId: String) {
+        init
+        val startedAt = SystemClock.elapsedRealtime()
+        try {
+            Innertube.ensureVisitorData()
+            jsPlayerManager { YoutubeJavaScriptPlayerManager.getSignatureTimestamp(videoId) }
+            TrackLog.d(
+                TAG,
+                "TIMING player JS warmed in ${SystemClock.elapsedRealtime() - startedAt}ms",
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            TrackLog.d(
+                TAG,
+                "player JS warm-up failed after ${SystemClock.elapsedRealtime() - startedAt}ms: ${e.message}",
+            )
+        }
+    }
+
+    /**
      * One walk per videoId at a time.
      *
      * [AudioCache]'s read-ahead resolves the queued track before it is
@@ -684,12 +736,29 @@ object StreamResolver {
                     continue
                 }
 
-                val verdict = timed("$videoId ${client.clientName} probe") { probe(url) }
+                // A client that proved a URL of its own minutes ago is not the
+                // thing this is guarding against — see [trusted]. Skipping it
+                // there is what takes a whole round trip off the common path.
+                val probed = !trusted(client)
+                val verdict = if (probed) {
+                    timed("$videoId ${client.clientName} probe") { probe(url) }
+                } else {
+                    Probe.OK
+                }
                 TrackLog.d(TAG, "TIMING $videoId ${client.clientName} total: ${SystemClock.elapsedRealtime() - clientStart}ms")
                 when (verdict) {
                     Probe.OK -> {
-                        TrackLog.d(TAG, "resolved $videoId via ${client.clientName} @ ${format.kbps}kbps")
+                        TrackLog.d(
+                            TAG,
+                            "resolved $videoId via ${client.clientName} @ ${format.kbps}kbps" +
+                                if (probed) "" else " (probe skipped; it served one moments ago)",
+                        )
                         served(client)
+                        // Only a real probe renews the trust. A skipped one
+                        // renewing it would mean a client never re-verified
+                        // for as long as it kept being used, which is a
+                        // guarantee that quietly stops being checked at all.
+                        if (probed) proven(client)
                         preferred = client
                         return Stream(url, format.kbps, format.mimeType)
                     }
@@ -1110,6 +1179,55 @@ object StreamResolver {
     }
 
     /**
+     * When each client last had a URL of its own *probed* successfully.
+     *
+     * [probe] is a whole extra round trip to googlevideo — it asks for the same
+     * two-megabyte range the player is about to ask for, reads sixteen kilobytes
+     * of it and throws them away — and on the common path it proves something
+     * that was already known. What it is really testing is whether Google is
+     * currently willing to serve URLs minted by *this identity*: the failures it
+     * catches are a 403, a consent interstitial dressed as a success, or a body
+     * that never arrives, and every one of those is a fact about the client and
+     * the network rather than about the track.
+     *
+     * So the answer is worth reusing for a few minutes rather than re-buying per
+     * track. Renewed only by a real probe — see [playerStream] — so a client in
+     * constant use is still verified once per [PROBE_TRUST_MS] instead of never.
+     *
+     * What is given up is the speed of the *diagnosis*, not the recovery: a URL
+     * that goes bad inside the window fails on the first range instead of before
+     * it, which [ChunkedDataSource][com.music.bitchord.playback.ChunkedDataSource]
+     * hands to [onPlaybackRefused] and [PlaybackService][com.music.bitchord.playback.PlaybackService]'s
+     * `recoverFrom` picks up. That costs one retry rather than a track that never
+     * plays — and [onPlaybackRefused] withdraws the trust as it goes, so the same
+     * client cannot spend the rest of the window skipping the check that would
+     * have caught it.
+     */
+    private val provenAt = ConcurrentHashMap<String, Long>()
+
+    /**
+     * How long a successful probe vouches for the client that earned it.
+     *
+     * Short, because what it is standing in for is Google's current opinion of
+     * an identity, and that changes on its own schedule — the same reasoning
+     * behind [STAND_DOWN_MS], at a third of the length because being wrong here
+     * costs a retry on a track rather than ten minutes of skipping a client.
+     */
+    private const val PROBE_TRUST_MS = 3 * 60 * 1000L
+
+    private fun proven(client: PlayerClient) {
+        provenAt[key(client)] = SystemClock.elapsedRealtime()
+    }
+
+    /** Whether [client] proved a URL recently enough to be taken at its word. */
+    private fun trusted(client: PlayerClient): Boolean {
+        val at = provenAt[key(client)] ?: return false
+        if (SystemClock.elapsedRealtime() - at <= PROBE_TRUST_MS) return true
+        provenAt.remove(key(client))
+        return false
+    }
+
+    /**
      * A client refused the session rather than the track — see [playerStream].
      *
      * Shares [standDownUntil] and its expiry with the per-track case, under a
@@ -1160,6 +1278,12 @@ object StreamResolver {
         // and the next YouTube track pays for a failure on a different server.
         if (url.toHttpUrlOrNull()?.host?.endsWith("googlevideo.com") != true) return
         val client = PlayerClient.forStreamUrl(url)
+        // Whatever this client proved last time, it has just been contradicted
+        // by a real fetch — so the next URL it mints is probed rather than taken
+        // on that record. Without this, a client that went bad inside its trust
+        // window would go on skipping the one check that catches it, for every
+        // track, until the window happened to run out. See [provenAt].
+        provenAt.remove(key(client))
         // Keyed by videoId, and the fetch only knows the googlevideo URL it was
         // handed; the map is a latency cache of a few dozen entries, so finding
         // the way back costs nothing worth measuring.
