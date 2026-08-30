@@ -57,7 +57,7 @@ val lastfmSecret: String = (
     ).trim()
 
 android {
-    namespace = "com.music.bitchord"
+    namespace = "com.avyra.music"
     compileSdk = 36
 
     defaultConfig {
@@ -130,6 +130,34 @@ android {
                 storePassword = signing.getProperty("storePassword")
                 keyAlias = signing.getProperty("keyAlias")
                 keyPassword = signing.getProperty("keyPassword")
+
+                /*
+                 * Sign with every scheme this minSdk can use, rather than the
+                 * v2-only default AGP leaves a config on.
+                 *
+                 * v1 stays off deliberately: it is the old JAR signature, only
+                 * consulted below API 24, and minSdk here is 26 — enabling it
+                 * would add a second signature nothing verifies and slow every
+                 * build to produce it.
+                 *
+                 * v3 is the one that matters. It is what Android 9 and up
+                 * prefer, and it carries a rotation record — so if this key is
+                 * ever compromised or replaced, a future build can prove it
+                 * descends from this one instead of becoming an app nobody can
+                 * update to. A v2-only APK has no way to express that, which
+                 * makes the key a permanent single point of failure.
+                 *
+                 * v4 sits beside the APK as a separate .idsig and lets Android
+                 * 11+ install incrementally. Harmless where unsupported: the
+                 * installer simply ignores a file it does not use.
+                 *
+                 * None of this changes the key, so the result still installs
+                 * over an existing build.
+                 */
+                enableV1Signing = false
+                enableV2Signing = true
+                enableV3Signing = true
+                enableV4Signing = true
             }
         }
     }

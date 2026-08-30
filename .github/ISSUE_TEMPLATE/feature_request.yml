@@ -1,0 +1,30 @@
+name: Feature request
+description: Suggest a focused improvement for Avyra.
+title: "[Feature] "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Explain the listener or contributor problem first.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: Suggested approach
+      description: Describe how you imagine it working.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Final check
+      options:
+        - label: I searched existing issues and requests.
+          required: true
