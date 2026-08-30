@@ -322,7 +322,7 @@ dependencies {
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
 
     // ---- JS module execution: QuickJS VM for style source plugins ----
-    implementation("io.github.dokar3:quickjs-kt-android:1.0.5")
+    implementation("io.github.dokar3:quickjs-kt-android:1.0.14")
 
     // ---- Automix: on-device beat/downbeat model (Beat This!, MIT-licensed) ----
     // The full android artifact, not onnxruntime-mobile: mobile only loads .ort
