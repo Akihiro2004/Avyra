@@ -49,6 +49,8 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.ErrorOutline
+import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -145,6 +147,7 @@ import com.music.bitchord.data.sources.SourceRegistry
 import com.music.bitchord.ui.components.ListenBrainzTokenAlert
 import com.music.bitchord.ui.components.TextValueAlert
 import com.music.bitchord.ui.components.MiniPlayer
+import com.music.bitchord.ui.components.StatusPill
 import com.music.bitchord.ui.components.TopBarAccountButton
 import com.music.bitchord.ui.components.TopBarDownloadButton
 import com.music.bitchord.ui.components.TopFadeBlur
@@ -175,6 +178,7 @@ import com.music.bitchord.ui.theme.rememberArtworkPalette
 import com.music.bitchord.ui.theme.SystemBarIcons
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Locale
 
@@ -364,6 +368,41 @@ private fun AvyraApp(
     var updateDialogShown by rememberSaveable { mutableStateOf(false) }
     var showUpdateDialog by remember { mutableStateOf(false) }
     val updateAvailable by viewModel.updateAvailable.collectAsStateWithLifecycle()
+
+    // The check the user asked for, and the download it turns into. Kept apart
+    // from [updateAvailable], which is the silent launch poll and says nothing
+    // when there is no update — see [AppUpdateChecker.CheckState].
+    val checkState by AppUpdateChecker.checkState.collectAsStateWithLifecycle()
+    val updateDownload by AppUpdateChecker.download.collectAsStateWithLifecycle()
+
+    // One tap, not three. A check that finds something goes straight on to
+    // fetching it, and a fetch that lands goes straight on to the installer —
+    // the listener asked for the update, not for a tour of its stages. The one
+    // step that cannot be automated is Android's own install prompt.
+    LaunchedEffect(checkState) {
+        if (checkState is AppUpdateChecker.CheckState.Found) {
+            AppUpdateChecker.downloadApk(context)
+        }
+    }
+    LaunchedEffect(updateDownload) {
+        (updateDownload as? AppUpdateChecker.DownloadState.Ready)?.let { ready ->
+            AppUpdateChecker.installApk(context, ready.file)
+        }
+    }
+    // Outcomes nothing follows from clear themselves; the ones that are still
+    // going stay up until they resolve.
+    LaunchedEffect(checkState) {
+        when (checkState) {
+            is AppUpdateChecker.CheckState.UpToDate,
+            is AppUpdateChecker.CheckState.Failed,
+            is AppUpdateChecker.CheckState.NotConfigured,
+            -> {
+                delay(PILL_DWELL_MS)
+                AppUpdateChecker.clearCheckState()
+            }
+            else -> Unit
+        }
+    }
 
     /**
      * The single gate both surfaces read, so the icon can't announce the update
@@ -1473,6 +1512,7 @@ private fun AvyraApp(
                             onSources = { showSources = true },
                             onSpotifyCanvasAuth = { showSpotifyCanvasAuth = true },
                             onAppLanguage = { showAppLanguage = true },
+                            onCheckUpdates = { scope.launch { AppUpdateChecker.checkNow() } },
                             contentPadding = listPadding,
                         )
                     } else if (page != null && page.browseId.isDeviceFolder()) {
@@ -1866,6 +1906,42 @@ private fun AvyraApp(
                             )
                         }
                     },
+                )
+
+                // Feedback for a check the listener asked for, and for the
+                // download it turns into. Under the bar rather than over it, so
+                // the bar's own blur is what it drops out of.
+                StatusPill(
+                    visible = checkState !is AppUpdateChecker.CheckState.Idle,
+                    text = when (val state = checkState) {
+                        is AppUpdateChecker.CheckState.Checking -> "Checking for updates"
+                        is AppUpdateChecker.CheckState.UpToDate ->
+                            "Avyra ${BuildConfig.VERSION_NAME} is up to date"
+                        is AppUpdateChecker.CheckState.NotConfigured -> "Updates are not set up"
+                        is AppUpdateChecker.CheckState.Failed -> state.reason
+                        is AppUpdateChecker.CheckState.Found -> when (val d = updateDownload) {
+                            is AppUpdateChecker.DownloadState.Downloading ->
+                                "Downloading ${(d.fraction * 100).toInt()}%"
+                            is AppUpdateChecker.DownloadState.Ready -> "Ready to install"
+                            is AppUpdateChecker.DownloadState.Failed -> d.message
+                            else -> "Avyra ${state.version} available"
+                        }
+                        else -> ""
+                    },
+                    busy = checkState is AppUpdateChecker.CheckState.Checking ||
+                        updateDownload is AppUpdateChecker.DownloadState.Downloading,
+                    icon = when (checkState) {
+                        is AppUpdateChecker.CheckState.UpToDate -> Icons.Rounded.CheckCircle
+                        is AppUpdateChecker.CheckState.Failed,
+                        is AppUpdateChecker.CheckState.NotConfigured,
+                        -> Icons.Rounded.ErrorOutline
+                        else -> Icons.Rounded.SystemUpdate
+                    },
+                    hazeState = hazeState,
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .statusBarsPadding()
+                        .padding(top = PILL_DROP),
                 )
 
                 // Drawn before the bars so their own glass reads on top of it.
@@ -2656,3 +2732,15 @@ private const val TAB_SEARCH = 3
  * prefix has to be the one thing both the writing and the reading agree on.
  */
 private const val TAB_KEY = "tab:"
+
+/**
+ * How long a finished result stays up.
+ *
+ * Long enough to read six words without hurrying, short enough that it is gone
+ * before it becomes something to dismiss. Only settled outcomes use it — a
+ * check still running, or a download in progress, stays until it resolves.
+ */
+private const val PILL_DWELL_MS = 2_200L
+
+/** Clear of the bar, so the pill reads as beneath it rather than inside it. */
+private val PILL_DROP = 58.dp

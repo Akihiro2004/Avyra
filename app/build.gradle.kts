@@ -24,6 +24,20 @@ val signing = Properties().apply {
  * Set MODULE_INDEX_URL in local.properties to enable it.
  * If absent, the app builds fine — Settings will show a warning.
  */
+/**
+ * The app's version, and the only place it is written down.
+ *
+ * Read here rather than typed into this file so a release is a one-line edit
+ * in `version.properties` — see that file for why the name and the code move
+ * independently, and why the code must never go backwards.
+ *
+ * Committed, unlike `keystore.properties` and `local.properties`: those hold
+ * secrets and machine-specific paths, this is source.
+ */
+val versionProps = Properties().apply {
+    rootProject.file("version.properties").inputStream().use { load(it) }
+}
+
 val localProps = Properties().apply {
     val file = rootProject.file("local.properties")
     if (file.exists()) file.inputStream().use { load(it) }
@@ -52,8 +66,8 @@ android {
         // Haze falls back to a translucent scrim below that.
         minSdk = 26
         targetSdk = 36
-        versionCode = 10
-        versionName = "1.5"
+        versionCode = versionProps.getProperty("versionCode").trim().toInt()
+        versionName = versionProps.getProperty("versionName").trim()
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

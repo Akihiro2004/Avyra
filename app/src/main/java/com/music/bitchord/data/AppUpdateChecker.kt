@@ -1,11 +1,12 @@
 package com.music.bitchord.data
 
 import android.content.Context
+import android.app.PendingIntent
 import android.content.Intent
+import android.content.pm.PackageInstaller
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
-import androidx.core.content.FileProvider
 import com.music.bitchord.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -38,6 +39,8 @@ import java.io.File
  */
 object AppUpdateChecker {
 
+    private const val TAG = "BitChord"
+
     data class UpdateInfo(
         val version: String,
         val releaseUrl: String,
@@ -64,28 +67,84 @@ object AppUpdateChecker {
     private val _download = MutableStateFlow<DownloadState>(DownloadState.Idle)
     val download = _download.asStateFlow()
 
+    /**
+     * How the last *user-initiated* check went.
+     *
+     * [available] cannot answer this. It holds an update or null, and null is
+     * three different things: not looked yet, looked and you are current, and
+     * looked and the network refused. That ambiguity is fine for the silent
+     * poll at launch — nothing is waiting on it — and useless for a button,
+     * where saying nothing back is indistinguishable from the button being
+     * broken. So the manual path reports separately and leaves [available] to
+     * mean what it always meant.
+     */
+    sealed interface CheckState {
+        data object Idle : CheckState
+        data object Checking : CheckState
+        data object UpToDate : CheckState
+        data class Found(val version: String) : CheckState
+        data class Failed(val reason: String) : CheckState
+
+        /** No endpoint compiled in — see `AVYRA_UPDATE_API_URL`. */
+        data object NotConfigured : CheckState
+    }
+
+    private val _checkState = MutableStateFlow<CheckState>(CheckState.Idle)
+    val checkState = _checkState.asStateFlow()
+
     /** Set from the UI thread when the user cancels; polled between network reads. */
     @Volatile
     private var downloadCancelled = false
 
-    suspend fun check() = withContext(Dispatchers.IO) {
+    /**
+     * The silent poll at launch. Publishes an update if there is one and says
+     * nothing otherwise — see [CheckState] for why that is wrong for a button
+     * and right here.
+     */
+    suspend fun check() {
+        fetchLatest()
+    }
+
+    /**
+     * The same lookup, reported.
+     *
+     * Runs on [Dispatchers.IO] like everything else here, and drives
+     * [checkState] through Checking into exactly one outcome so the UI can
+     * show a result either way. [available] is still set on success, so the
+     * full update dialog works from a manual check exactly as it does from
+     * the automatic one.
+     */
+    suspend fun checkNow() {
+        _checkState.value = CheckState.Checking
+        _checkState.value = fetchLatest()
+    }
+
+    /** Back to quiet once a result has been read — see the pill's dismissal. */
+    fun clearCheckState() {
+        _checkState.value = CheckState.Idle
+    }
+
+    private suspend fun fetchLatest(): CheckState = withContext(Dispatchers.IO) {
         val endpoint = BuildConfig.UPDATE_API_URL.takeIf { it.isNotBlank() }
-            ?: return@withContext
+            ?: return@withContext CheckState.NotConfigured
         runCatching {
             val request = Request.Builder().url(endpoint).build()
             val body = Http.client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) null else response.body?.string()
-            } ?: return@runCatching
-            val release = json.parseToJsonElement(body) as? JsonObject ?: return@runCatching
-            val tag = release["tag_name"]?.jsonPrimitive?.contentOrNull ?: return@runCatching
-            val url = release["html_url"]?.jsonPrimitive?.contentOrNull ?: return@runCatching
+                if (!response.isSuccessful) error("HTTP ${response.code}") else response.body?.string()
+            } ?: error("Empty response")
+            val release = json.parseToJsonElement(body) as? JsonObject ?: error("Malformed release")
+            val tag = release["tag_name"]?.jsonPrimitive?.contentOrNull ?: error("Release has no tag")
+            val url = release["html_url"]?.jsonPrimitive?.contentOrNull ?: error("Release has no page")
             val apkUrl = apkAssetUrl(release)
             val notes = release["body"]?.jsonPrimitive?.contentOrNull
             val latest = tag.removePrefix("v")
             if (isNewer(latest, BuildConfig.VERSION_NAME)) {
                 _available.value = UpdateInfo(latest, url, apkUrl, notes)
+                CheckState.Found(latest)
+            } else {
+                CheckState.UpToDate
             }
-        }
+        }.getOrElse { CheckState.Failed(it.message ?: "Couldn’t reach the release feed") }
     }
 
     /**
@@ -182,34 +241,79 @@ object AppUpdateChecker {
     }
 
     /**
-     * Hands a downloaded APK to the system installer.
+     * Installs a downloaded APK, and puts the app back on screen afterwards.
      *
-     * Sideloaded apps need the user's blessing per app ("install unknown apps");
-     * without it the installer intent silently does nothing on most ROMs, so
-     * the user is sent to that one switch first and taps Install again after.
+     * Driven through [PackageInstaller] rather than the older
+     * `ACTION_INSTALL_PACKAGE` intent, for one reason worth the extra code: a
+     * session reports its outcome to a receiver, and that receiver runs *after*
+     * the install, in the new build's process. An intent cannot do that. The
+     * install replaces this app and kills the process that launched it, so
+     * there is no result to come back to and nothing left to relaunch from —
+     * which is why the intent version always ended with the app simply gone and
+     * the user left on their home screen. See [UpdateInstallReceiver].
+     *
+     * What it cannot do is skip the confirmation. Android shows a system
+     * install prompt for every install by an ordinary app, and no permission
+     * available to one removes it — `REQUEST_INSTALL_PACKAGES` only earns the
+     * right to ask. So the honest shape of this is: one tap here, one tap on
+     * the system dialog, and the app reopens itself.
+     *
+     * Sideloaded apps also need the user's blessing per app ("install unknown
+     * apps"). Without it the session is refused, so the user is sent to that
+     * switch first and taps Update again after.
      */
     fun installApk(context: Context, file: File) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
             !context.packageManager.canRequestPackageInstalls()
         ) {
-            context.startActivity(
-                Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES)
-                    .setData(Uri.parse("package:${context.packageName}"))
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-            )
+            runCatching {
+                context.startActivity(
+                    Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES)
+                        .setData(Uri.parse("package:${context.packageName}"))
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+            }
             return
         }
-        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-        context.startActivity(
-            Intent(Intent.ACTION_INSTALL_PACKAGE)
-                .setDataAndType(uri, "application/vnd.android.package-archive")
-                .putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true)
-                .putExtra(Intent.EXTRA_RETURN_RESULT, true)
-                .addFlags(
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION or
-                        Intent.FLAG_ACTIVITY_NEW_TASK,
-                ),
-        )
+
+        runCatching {
+            val installer = context.packageManager.packageInstaller
+            val params = PackageInstaller.SessionParams(
+                PackageInstaller.SessionParams.MODE_FULL_INSTALL,
+            ).apply {
+                setAppPackageName(context.packageName)
+            }
+            val sessionId = installer.createSession(params)
+            installer.openSession(sessionId).use { session ->
+                session.openWrite("avyra", 0, file.length()).use { out ->
+                    file.inputStream().use { it.copyTo(out) }
+                    session.fsync(out)
+                }
+                // Mutable because the system fills in the confirmation intent
+                // it wants shown — see [UpdateInstallReceiver]. Immutable here
+                // means STATUS_PENDING_USER_ACTION arrives with nothing to
+                // launch and the install silently never happens.
+                val flags = PendingIntent.FLAG_UPDATE_CURRENT or
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        PendingIntent.FLAG_MUTABLE
+                    } else {
+                        0
+                    }
+                val callback = PendingIntent.getBroadcast(
+                    context,
+                    sessionId,
+                    Intent(context, UpdateInstallReceiver::class.java)
+                        .setPackage(context.packageName),
+                    flags,
+                )
+                session.commit(callback.intentSender)
+            }
+        }.onFailure { error ->
+            TrackLog.w(TAG, "could not start the update install: ${error.message}")
+            _download.value = DownloadState.Failed(
+                error.message ?: "Couldn’t start the installer",
+            )
+        }
     }
 
     /** Numeric, dot-separated comparison — "1.10" outranks "1.9". */

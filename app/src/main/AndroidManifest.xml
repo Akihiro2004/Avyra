@@ -261,6 +261,17 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+
+        <!--
+          Hears the outcome of an update this app asked PackageInstaller to
+          install, and is what lets the app reopen itself afterwards — see
+          UpdateInstallReceiver. Not exported: the only sender is the system,
+          replying to a session this app itself committed.
+        -->
+        <receiver
+            android:name=".data.UpdateInstallReceiver"
+            android:exported="false" />
+
     </application>
 
 </manifest>
