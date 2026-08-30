@@ -1,0 +1,10 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="avyra" x1="96" y1="96" x2="928" y2="928" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7057FF"/>
+      <stop offset="1" stop-color="#35E2C1"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" rx="224" fill="url(#avyra)"/>
+  <path fill="white" fill-rule="evenodd" d="M248 876C160 876 105 783 146 702L420 166C458 92 566 92 604 166L878 702C919 783 864 876 776 876C721 876 680 846 654 796L574 641C548 591 476 591 450 641L370 796C344 846 303 876 248 876ZM466 390C443 390 428 408 428 432V592C428 622 460 641 486 625L626 538C651 523 651 487 626 472L486 385C479 381 472 390 466 390Z"/>
+</svg>
