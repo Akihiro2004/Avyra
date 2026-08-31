@@ -4,8 +4,27 @@ This file records user-facing changes. Development details still live in the Git
 
 ## Unreleased
 
+## 1.0.2 - 2026-08-31
+
+### Fixed
+
+- In-app updates failed partway through the download, usually reporting "software caused connection abort". The download ran on the screen that started it, so anything that rebuilt that screen — leaving the app during a download long enough for Android to reclaim the activity, or a rotation — cancelled the transfer and closed the connection out from under it.
+- Asking for an update from Settings started one download and opened a dialog offering a second; taking the dialog up on it deleted the first download's half-finished file while it was still being written.
+- An interrupted update download now resumes from where it stopped and retries a few times, rather than failing outright. A hundred-megabyte download over mobile data rarely survives being restarted from zero on every dropped connection.
+- An update whose download ended early is now reported as a failed download instead of being handed to the installer as a corrupt package.
+
+## 1.0.1 - 2026-08-31
+
+### Fixed
+
+- Some songs played a completely different recording than the one on the row, every time. A track offered to a higher-ranked source was matched on title and artist alone, so another recording of the same song under the same name could be served in its place — and once its audio was cached, every later play repeated it. A replacement now has to agree on runtime as well, and a row that carries no runtime is left with the source it came from.
+- The equalizer's fader handle and its fill were invisible as soon as a band left the centre.
+- Moving one equalizer band silently reset the other nine, so a curve could never be built up across several bands.
+- Equalizer presets took back exactly as much level as they added, which made every one of them a net cut — "Bass" left the bass where it was and turned everything else down. Presets now keep half their boost.
+
 ### Changed
 
+- Redesigned the settings screen: grouped panels with coloured icon tiles, quieter section headings, and rows aligned to a single text column.
 - Finished the active Avyra package, source namespace, native library, resources, and internal identity migration.
 - Added compatibility readers for settings, source configuration, account storage, backups, embedded lyrics, and downloads made by earlier builds.
 - Reworked the public README and added contribution, security, support, conduct, trademark, and third-party documentation.

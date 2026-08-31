@@ -7,7 +7,6 @@ import android.widget.Toast
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -265,6 +264,7 @@ fun SettingsScreen(
         SettingsGroup {
             SettingsRow(
                 icon = Icons.Rounded.Person,
+                tint = SettingsTint.Blue,
                 title = stringResource(R.string.account_integrations),
                 subtitle = account?.email?.takeIf { it.isNotBlank() }
                     ?: if (signedIn) "Signed in" else "Not signed in",
@@ -281,6 +281,7 @@ fun SettingsScreen(
         SettingsGroup(header = "Audio quality") {
             SettingsRow(
                 icon = Icons.Rounded.Wifi,
+                tint = SettingsTint.Blue,
                 title = stringResource(R.string.on_wifi),
                 badge = stringResource(R.string.in_use).takeIf { metered == false },
                 value = wifiQuality.localizedLabel(),
@@ -289,6 +290,7 @@ fun SettingsScreen(
             RowDivider()
             SettingsRow(
                 icon = Icons.Rounded.SignalCellularAlt,
+                tint = SettingsTint.Green,
                 title = stringResource(R.string.on_mobile_data),
                 badge = stringResource(R.string.in_use).takeIf { metered == true },
                 value = cellularQuality.localizedLabel(),
@@ -304,6 +306,7 @@ fun SettingsScreen(
         SettingsGroup(header = stringResource(R.string.downloads)) {
             SettingsRow(
                 icon = Icons.Rounded.Download,
+                tint = SettingsTint.Blue,
                 title = stringResource(R.string.download_quality),
                 subtitle = stringResource(R.string.download_quality_subtitle, downloadQuality.perTrack),
                 value = downloadQuality.localizedLabel(),
@@ -322,6 +325,7 @@ fun SettingsScreen(
         SettingsGroup(header = stringResource(R.string.playback)) {
             SettingsRow(
                 icon = Icons.Rounded.Extension,
+                tint = SettingsTint.Indigo,
                 title = "Sources",
                 subtitle = "Where audio comes from, and in what order",
                 onClick = onSources,
@@ -333,6 +337,7 @@ fun SettingsScreen(
             if (!smartFade) {
                 SliderRow(
                     icon = Icons.Rounded.Waves,
+                    tint = SettingsTint.Teal,
                     title = stringResource(R.string.crossfade),
                     subtitle = stringResource(R.string.crossfade_subtitle),
                     value = if (crossfade == 0) stringResource(R.string.off) else "${crossfade}s",
@@ -345,6 +350,7 @@ fun SettingsScreen(
             }
             SettingsRow(
                 icon = Icons.Rounded.AutoAwesome,
+                tint = SettingsTint.Purple,
                 title = stringResource(R.string.automix),
                 subtitle = if (smartFade) {
                     "Blends every transition, timed automatically from each track. Turn off if facing overheating or lag."
@@ -363,6 +369,7 @@ fun SettingsScreen(
             RowDivider()
             SettingsRow(
                 icon = Icons.AutoMirrored.Rounded.VolumeOff,
+                tint = SettingsTint.Orange,
                 title = stringResource(R.string.skip_silence),
                 subtitle = stringResource(R.string.skip_silence_subtitle),
                 trailing = {
@@ -377,6 +384,7 @@ fun SettingsScreen(
             RowDivider()
             SettingsRow(
                 icon = Icons.Rounded.SurroundSound,
+                tint = SettingsTint.Indigo,
                 title = stringResource(R.string.spatial_audio),
                 subtitle = stringResource(R.string.spatial_audio_subtitle),
                 trailing = {
@@ -391,6 +399,7 @@ fun SettingsScreen(
             RowDivider()
             SettingsRow(
                 icon = Icons.Rounded.Tune,
+                tint = SettingsTint.Orange,
                 title = stringResource(R.string.equalizer),
                 subtitle = "Ten bands, built in",
                 onClick = onEqualizer,
@@ -398,6 +407,7 @@ fun SettingsScreen(
             RowDivider()
             SettingsRow(
                 icon = Icons.Rounded.Tune,
+                tint = SettingsTint.Orange,
                 title = "System equalizer",
                 // Named for what it is rather than what it does, because on a
                 // device with no panel to open it does nothing at all — and
@@ -408,6 +418,7 @@ fun SettingsScreen(
             RowDivider()
             SettingsRow(
                 icon = Icons.Rounded.GraphicEq,
+                tint = SettingsTint.Grey,
                 title = stringResource(R.string.show_nerd_stats),
                 subtitle = stringResource(R.string.show_nerd_stats_subtitle),
                 trailing = {
@@ -422,6 +433,7 @@ fun SettingsScreen(
             RowDivider()
             SettingsRow(
                 icon = Icons.Rounded.SmartDisplay,
+                tint = SettingsTint.Red,
                 title = stringResource(R.string.video_audio_conversion),
                 subtitle = stringResource(R.string.video_audio_conversion_subtitle),
                 trailing = {
@@ -446,6 +458,7 @@ fun SettingsScreen(
             RowDivider()
             SettingsRow(
                 icon = Icons.Rounded.MotionPhotosOff,
+                tint = SettingsTint.Grey,
                 title = stringResource(R.string.reduce_animation),
                 subtitle = stringResource(R.string.reduce_animation_subtitle),
                 trailing = {
@@ -460,6 +473,7 @@ fun SettingsScreen(
             RowDivider()
             SettingsRow(
                 icon = Icons.Rounded.BlurOff,
+                tint = SettingsTint.Grey,
                 title = stringResource(R.string.reduce_dynamic_blur),
                 subtitle = stringResource(R.string.reduce_dynamic_blur_subtitle),
                 trailing = {
@@ -479,6 +493,7 @@ fun SettingsScreen(
             if (fullBleedArtworkAvailable(windowWidth)) {
                 SettingsRow(
                     icon = Icons.Rounded.Fullscreen,
+                    tint = SettingsTint.Teal,
                     title = stringResource(R.string.full_screen_cover_art),
                     subtitle = stringResource(R.string.full_screen_cover_art_subtitle),
                     trailing = {
@@ -494,6 +509,7 @@ fun SettingsScreen(
             }
             SettingsRow(
                 icon = Icons.Rounded.Animation,
+                tint = SettingsTint.Pink,
                 title = stringResource(R.string.animated_cover_art),
                 subtitle = stringResource(R.string.animated_cover_art_subtitle),
                 trailing = {
@@ -520,7 +536,7 @@ fun SettingsScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable(onClick = onSpotifyCanvasAuth)
-                        .padding(start = ROW_INSET, end = ROW_INSET, top = 4.dp, bottom = 10.dp),
+                        .padding(start = TEXT_INSET, end = ROW_INSET, top = 4.dp, bottom = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
@@ -537,6 +553,7 @@ fun SettingsScreen(
             RowDivider()
             SettingsRow(
                 icon = Icons.AutoMirrored.Rounded.Notes,
+                tint = SettingsTint.Blue,
                 title = stringResource(R.string.synced_lyrics),
                 subtitle = stringResource(R.string.synced_lyrics_subtitle),
                 trailing = {
@@ -555,6 +572,7 @@ fun SettingsScreen(
                 RowDivider()
                 SettingsRow(
                     icon = Icons.Rounded.Language,
+                    tint = SettingsTint.Blue,
                     title = stringResource(R.string.lyrics_sources),
                     subtitle = lyricsSources
                         .sortedBy { it.ordinal }
@@ -570,6 +588,7 @@ fun SettingsScreen(
         SettingsGroup(header = stringResource(R.string.storage)) {
             SliderRow(
                 icon = Icons.Rounded.Storage,
+                tint = SettingsTint.Grey,
                 title = stringResource(R.string.song_cache_limit),
                 subtitle = if (cacheLimitMb > CACHE_WARNING_MB) {
                     "Up to ${formatCacheSize(cacheLimitMb)} of downloaded audio kept on " +
@@ -589,6 +608,7 @@ fun SettingsScreen(
             RowDivider()
             SettingsRow(
                 icon = Icons.Rounded.DeleteSweep,
+                tint = SettingsTint.Red,
                 title = stringResource(R.string.clear_song_cache),
                 subtitle = stringResource(R.string.clear_song_cache_subtitle),
                 onClick = {
@@ -600,6 +620,7 @@ fun SettingsScreen(
             RowDivider()
             SettingsRow(
                 icon = Icons.Rounded.DeleteSweep,
+                tint = SettingsTint.Red,
                 title = stringResource(R.string.clear_image_cache),
                 subtitle = stringResource(R.string.clear_image_cache_subtitle),
                 onClick = {
@@ -614,6 +635,7 @@ fun SettingsScreen(
         SettingsGroup(header = stringResource(R.string.your_data)) {
             SettingsRow(
                 icon = Icons.Rounded.BarChart,
+                tint = SettingsTint.Pink,
                 title = stringResource(R.string.replay),
                 subtitle = stringResource(R.string.replay_subtitle),
                 onClick = onOpenReplay,
@@ -621,6 +643,7 @@ fun SettingsScreen(
             RowDivider()
             SettingsRow(
                 icon = Icons.Rounded.LocalOffer,
+                tint = SettingsTint.Orange,
                 title = stringResource(R.string.work_out_genres),
                 subtitle = if (replayGenres) {
                     "Asks Last.fm what an artist plays — their name is sent, nothing else"
@@ -639,6 +662,7 @@ fun SettingsScreen(
             RowDivider()
             SettingsRow(
                 icon = Icons.Rounded.FileUpload,
+                tint = SettingsTint.Green,
                 title = stringResource(R.string.export_data),
                 subtitle = exportStatus ?: stringResource(R.string.export_data_subtitle),
                 onClick = { exportPicker.launch(Backup.suggestedName()) },
@@ -646,6 +670,7 @@ fun SettingsScreen(
             RowDivider()
             SettingsRow(
                 icon = Icons.Rounded.FileDownload,
+                tint = SettingsTint.Green,
                 title = stringResource(R.string.import_data),
                 subtitle = importStatus ?: stringResource(R.string.import_data_subtitle),
                 onClick = { confirmImport = true },
@@ -658,6 +683,7 @@ fun SettingsScreen(
         ) {
             SettingsRow(
                 icon = Icons.Rounded.PlaylistPlay,
+                tint = SettingsTint.Teal,
                 title = stringResource(R.string.play_next_on_swipe),
                 subtitle = if (swipeToPlayNext) {
                     "Swiping a song plays it next"
@@ -676,6 +702,7 @@ fun SettingsScreen(
             RowDivider()
             SettingsRow(
                 icon = Icons.Rounded.History,
+                tint = SettingsTint.Indigo,
                 title = stringResource(R.string.dont_repeat_songs),
                 subtitle = stringResource(R.string.dont_repeat_songs_subtitle),
                 trailing = {
@@ -690,6 +717,7 @@ fun SettingsScreen(
             RowDivider()
             SettingsRow(
                 icon = Icons.Rounded.MusicOff,
+                tint = SettingsTint.Red,
                 title = stringResource(R.string.stop_music_on_close),
                 subtitle = stringResource(R.string.stop_music_on_close_subtitle),
                 trailing = {
@@ -704,6 +732,7 @@ fun SettingsScreen(
             RowDivider()
             SettingsRow(
                 icon = Icons.Rounded.VolumeOff,
+                tint = SettingsTint.Orange,
                 title = stringResource(R.string.hide_volume_bar),
                 subtitle = stringResource(R.string.hide_volume_bar_subtitle),
                 trailing = {
@@ -722,6 +751,7 @@ fun SettingsScreen(
                 ?: Locale.getDefault().language
             SettingsRow(
                 icon = Icons.Rounded.Language,
+                tint = SettingsTint.Blue,
                 title = stringResource(R.string.app_language),
                 subtitle = stringResource(languageDisplayNameRes(selectedLanguage)),
                 onClick = onAppLanguage,
@@ -736,6 +766,7 @@ fun SettingsScreen(
         ) {
             SettingsRow(
                 icon = Icons.Rounded.SystemUpdate,
+                tint = SettingsTint.Grey,
                 title = "Check for Updates",
                 subtitle = "Avyra $version",
                 onClick = onCheckUpdates,
@@ -997,7 +1028,10 @@ internal fun AccountCard(
             .fillMaxWidth()
             .padding(horizontal = GROUP_INSET)
             .clip(GroupShape)
-            .background(MaterialTheme.colorScheme.surfaceVariant)
+            // The same fill as every other group. It was `surfaceVariant`,
+            // which made the one card at the top of the page a different
+            // shade from the ten below it for no reason the reader can see.
+            .background(MaterialTheme.colorScheme.surface)
             .then(if (signedIn) Modifier else Modifier.clickable(onClick = onSignIn))
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -1208,14 +1242,83 @@ private fun DownloadQualitySheet(
 
 // ---- Building blocks --------------------------------------------------------
 
-internal val GroupShape = RoundedCornerShape(22.dp)
+/**
+ * The corner an inset group is cut to.
+ *
+ * Tighter than the 22dp this used, which read as a stack of pills rather than
+ * as panels: the shape a settings list is asking for is a *card* with the
+ * corners taken off, and past about half the row height the curve starts eating
+ * into the first and last rows instead of framing them.
+ */
+internal val GroupShape = RoundedCornerShape(12.dp)
 internal val GROUP_INSET = 16.dp
 internal val ROW_INSET = 16.dp
-internal val ICON_SIZE = 22.dp
-internal val ICON_GAP = 14.dp
+
+/** The coloured square a row's glyph sits in — see [SettingsIconTile]. */
+internal val TILE_SIZE = 30.dp
+
+/** The glyph inside that square, inset enough to leave the tile reading as a tile. */
+internal val ICON_SIZE = 18.dp
+internal val ICON_GAP = 12.dp
 
 /** Where a row's text starts so dividers align with the text column. */
-internal val TEXT_INSET = ROW_INSET + ICON_SIZE + ICON_GAP
+internal val TEXT_INSET = ROW_INSET + TILE_SIZE + ICON_GAP
+
+/**
+ * The colours a row's icon tile is filled with.
+ *
+ * A settings list this long is read by *finding* a row, not by reading every
+ * row, and colour is what makes that possible — the eye lands on the orange
+ * square well before it has read the word next to it. That is the whole reason
+ * iOS puts one on every row, and the reason a monochrome list of thirty
+ * identical glyphs is slower to use however tidy it looks.
+ *
+ * The values are the Apple system palette rather than the app's own accent,
+ * deliberately: they are chosen to stay distinguishable from each other at
+ * 30dp, which a set derived from one brand hue cannot be. Avyra's blue is close
+ * enough to the system one that [Blue] doubles as the accent.
+ *
+ * Grouped by meaning rather than by row, so the same kind of setting is the
+ * same colour wherever it appears — network things blue, destructive things
+ * red, anything about the picture on screen indigo or pink.
+ */
+internal object SettingsTint {
+    val Blue = Color(0xFF0A84FF)
+    val Green = Color(0xFF30D158)
+    val Indigo = Color(0xFF5E5CE6)
+    val Orange = Color(0xFFFF9F0A)
+    val Pink = Color(0xFFFF375F)
+    val Purple = Color(0xFFBF5AF2)
+    val Red = Color(0xFFFF453A)
+    val Teal = Color(0xFF40C8E0)
+    val Yellow = Color(0xFFFFD60A)
+    val Grey = Color(0xFF8E8E93)
+}
+
+/**
+ * One row's glyph, in the rounded square that makes the list scannable.
+ *
+ * White on the fill whatever the theme: these are small, saturated and always
+ * the same, so a glyph that followed the theme would be legible in one mode and
+ * muddy in the other for no gain.
+ */
+@Composable
+internal fun SettingsIconTile(icon: ImageVector, tint: Color) {
+    Box(
+        modifier = Modifier
+            .size(TILE_SIZE)
+            .clip(RoundedCornerShape(7.dp))
+            .background(tint),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = Color.White,
+            modifier = Modifier.size(ICON_SIZE),
+        )
+    }
+}
 
 /**
  * One inset control panel, with a compact header above and an optional
@@ -1228,27 +1331,37 @@ internal fun SettingsGroup(
     content: @Composable () -> Unit,
 ) {
     if (header != null) {
+        // Quiet grey, in the words they were written in.
+        //
+        // This shouted — accent-coloured and upper-cased — which put the
+        // loudest thing on the page above every group rather than in it. A
+        // heading here is a label for a card the whitespace has already
+        // separated, so it only has to be readable, and the colour is better
+        // spent on the tiles, where it does actual work finding a row.
         Text(
-            text = header.uppercase(Locale.ROOT),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.primary,
+            text = header,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(
                 start = GROUP_INSET + 4.dp,
                 end = GROUP_INSET,
-                top = 26.dp,
-                bottom = 8.dp,
+                top = 28.dp,
+                bottom = 7.dp,
             ),
         )
     } else {
-        Spacer(Modifier.height(26.dp))
+        Spacer(Modifier.height(28.dp))
     }
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = GROUP_INSET)
             .clip(GroupShape)
-            .background(MaterialTheme.colorScheme.surface)
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, GroupShape),
+            // No outline. The card is told apart from the page by its fill, the
+            // way a grouped table view is — a border as well draws the eye to
+            // the boundary rather than to the rows inside it, and stacked ten
+            // deep it turns the page into a column of boxes.
+            .background(MaterialTheme.colorScheme.surface),
     ) {
         content()
     }
@@ -1288,6 +1401,12 @@ internal fun SettingsRow(
     value: String? = null,
     badge: String? = null,
     enabled: Boolean = true,
+    /**
+     * The tile colour — see [SettingsTint]. Grey by default so a caller that
+     * has no opinion still gets a tile rather than a bare glyph the row beside
+     * it would not line up with.
+     */
+    tint: Color = SettingsTint.Grey,
     onClick: (() -> Unit)? = null,
     trailing: (@Composable () -> Unit)? = null,
 ) {
@@ -1296,16 +1415,11 @@ internal fun SettingsRow(
             .fillMaxWidth()
             .then(if (onClick != null && enabled) Modifier.clickable(onClick = onClick) else Modifier)
             .alpha(if (enabled) 1f else 0.45f)
-            .heightIn(min = 52.dp)
-            .padding(horizontal = ROW_INSET, vertical = 12.dp),
+            .heightIn(min = 50.dp)
+            .padding(horizontal = ROW_INSET, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onBackground,
-            modifier = Modifier.size(ICON_SIZE),
-        )
+        SettingsIconTile(icon = icon, tint = tint)
         Spacer(Modifier.width(ICON_GAP))
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1366,7 +1480,9 @@ internal fun SettingsSubRow(
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onCheckedChange(!checked) }
-            .padding(start = ROW_INSET, end = ROW_INSET, top = 0.dp, bottom = 10.dp),
+            // Indented to the text column, so it reads as another line of the
+            // setting above rather than as a row whose icon went missing.
+            .padding(start = TEXT_INSET, end = ROW_INSET, top = 0.dp, bottom = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
@@ -1409,8 +1525,8 @@ internal fun Chevron() {
     Icon(
         Icons.Rounded.ChevronRight,
         contentDescription = null,
-        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-        modifier = Modifier.size(20.dp),
+        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
+        modifier = Modifier.size(18.dp),
     )
 }
 
@@ -1426,6 +1542,8 @@ internal fun SliderRow(
     valueRange: ClosedFloatingPointRange<Float>,
     steps: Int,
     subtitle: String? = null,
+    /** As [SettingsRow]'s, so a slider lines up with the rows either side of it. */
+    tint: Color = SettingsTint.Grey,
 ) {
     val colors = SliderDefaults.colors(
         thumbColor = MaterialTheme.colorScheme.primary,
@@ -1434,12 +1552,7 @@ internal fun SliderRow(
     )
     Column(Modifier.padding(start = ROW_INSET, end = ROW_INSET, top = 12.dp, bottom = 4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onBackground,
-                modifier = Modifier.size(ICON_SIZE),
-            )
+            SettingsIconTile(icon = icon, tint = tint)
             Spacer(Modifier.width(ICON_GAP))
             Column(Modifier.weight(1f)) {
                 Text(
@@ -1478,7 +1591,11 @@ internal fun SliderRow(
                     drawTick = { _, _ -> },
                 )
             },
-            modifier = Modifier.padding(start = ICON_SIZE + ICON_GAP),
+            // Lined up with the row's text rather than with its tile. Stated
+            // against the tile because that is what sets the column — reading
+            // it off the glyph inside the tile left the slider 12dp adrift of
+            // the title it belongs to.
+            modifier = Modifier.padding(start = TILE_SIZE + ICON_GAP),
         )
     }
 }

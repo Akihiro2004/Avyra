@@ -142,15 +142,21 @@ object SourceResolver {
         val pinned = SourceRegistry.instance(configId)
         val active = SourceRegistry.active()
 
+        // Whether a cross-source match could be corroborated if one were found.
+        // Both branches below play a file the pinned source did not issue,
+        // chosen on title and credit alone, so both answer to it — the same
+        // rule [substituteForYouTube] applies. See [worthSubstituting].
+        val checkable = target.durationSec != null
+
         // The upgrade path: with lossless asked for and the pinned source
         // unable to serve it, anything ranked above it that can is worth
         // asking first. This is the whole reason the list is ordered — it is
         // what makes "my own FLAC of this, if I have one, else stream it"
         // expressible.
-        if (request is StreamRequest.Lossless && pinned?.kind?.canServeLossless != true) {
+        if (request is StreamRequest.Lossless && pinned?.kind?.canServeLossless != true && checkable) {
             for (source in rankedAbove(configId, active)) {
                 if (!source.kind.canServeLossless) continue
-                val upgraded = matchAndStream(source, target, request) ?: continue
+                val upgraded = matchAndStream(source, target, request, strictLength = true) ?: continue
                 // Only a genuinely lossless answer is an upgrade. A source that
                 // *can* serve lossless but settled for a transcode of this
                 // particular track has not beaten the pinned source at anything
@@ -172,8 +178,18 @@ object SourceResolver {
         // user asked for, and another source having it is not unlikely — this
         // is the difference between a dead server skipping the queue forward
         // and a dead server being invisible.
-        val (fallbackSource, stream) =
-            bestAcross(active.filterNot { it.configId == configId }, target, request) ?: return null
+        //
+        // Deliberately *not* refused outright for an uncheckable target, unlike
+        // [substituteForYouTube]. The alternative there is YouTube playing the
+        // right track; the alternative here is a track that does not play at
+        // all, because the source that issued its id is the one that just
+        // failed. Still length-gated whenever there is a runtime to gate on.
+        val (fallbackSource, stream) = bestAcross(
+            active.filterNot { it.configId == configId },
+            target,
+            request,
+            strictLength = checkable,
+        ) ?: return null
         TrackLog.d(TAG, "fallback: '${target.title}' served by ${fallbackSource.displayName}")
         return stream
     }
@@ -203,11 +219,16 @@ object SourceResolver {
      */
     suspend fun substituteForYouTube(target: TrackMatcher.Target): SourceStream? {
         if (target.title.isBlank()) return null
+        if (!worthSubstituting(target, "substitution")) return null
         val active = SourceRegistry.active()
         val youtube = active.firstOrNull { it.kind == SourceKind.YOUTUBE } ?: return null
         val request = requestForNow()
-        val (source, stream) = bestAcross(rankedAbove(youtube.configId, active), target, request)
-            ?: return null
+        val (source, stream) = bestAcross(
+            rankedAbove(youtube.configId, active),
+            target,
+            request,
+            strictLength = true,
+        ) ?: return null
         // Says what was found, not what the caller will do with it. This
         // line used to read "substituted" unconditionally, including for
         // streams the caller went on to refuse — which made a log of a
@@ -247,11 +268,17 @@ object SourceResolver {
      */
     suspend fun prefetchSubstitute(target: TrackMatcher.Target): SourceStream? {
         if (target.title.isBlank()) return null
+        if (!worthSubstituting(target, "warm-up")) return null
         val active = SourceRegistry.active()
         val youtube = active.firstOrNull { it.kind == SourceKind.YOUTUBE } ?: return null
         val quick = rankedAbove(youtube.configId, active).filter { it.kind.worthPrefetching }
         if (quick.isEmpty()) return null
-        val (source, stream) = bestAcross(quick, target, requestForNow()) ?: return null
+        val (source, stream) = bestAcross(
+            quick,
+            target,
+            requestForNow(),
+            strictLength = true,
+        ) ?: return null
         TrackLog.d(
             TAG,
             "warmed: '${target.title}' from ${source.displayName} at ${stream.format.summary}",
@@ -634,6 +661,48 @@ object SourceResolver {
      */
     fun canSubstituteForYouTube(): Boolean =
         SourceRegistry.active().indexOfFirst { it.kind == SourceKind.YOUTUBE } > 0
+
+    /**
+     * Whether a match against [target] could be *corroborated* if one were
+     * found — which is the bar for playing a different file under the row the
+     * listener tapped.
+     *
+     * A substitution is the one thing this app does that the listener has no
+     * way of checking: the row keeps YouTube's title, artist and cover, and the
+     * audio comes from somewhere else entirely. Everything deciding that swap
+     * is text — [TrackMatcher] compares a title core, a version-marker set and
+     * an artist credit — and text is exactly what two different recordings of a
+     * song routinely agree on. A re-record, a film's second version, a
+     * compilation cut, a plainly mislabelled catalogue row: all of them share a
+     * title and a credit with the track being asked for, and none of them is
+     * that track.
+     *
+     * Runtime is the only field that separates them, so without one there is
+     * nothing standing between the listener and the wrong song — and the
+     * failure is silent, permanent and invisible, because the bytes land in the
+     * cache under this track's own key and every later play is served from disk
+     * without resolving anything.
+     *
+     * [upgradeFor] has always taken this line for the swap it makes *during*
+     * playback ("swapping the audio under a listener is only defensible when
+     * the replacement is the same recording"). The swap made before the first
+     * note went ungated, which is the harder case rather than the easier one:
+     * a mid-track swap announces itself as a break in the audio, and this one
+     * announces nothing at all.
+     *
+     * Refusing costs the sources their turn and nothing else. YouTube holds the
+     * track by definition and plays it — the right recording, from the source
+     * the row actually came from.
+     */
+    private fun worthSubstituting(target: TrackMatcher.Target, what: String): Boolean {
+        if (target.durationSec != null) return true
+        TrackLog.d(
+            TAG,
+            "$what skipped for '${target.title}': the queue row carried no runtime, " +
+                "so a match could not be told from a different recording of the same song",
+        )
+        return false
+    }
 
     /**
      * The sources ranked above [configId], in order.

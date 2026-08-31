@@ -700,6 +700,26 @@ object AppSettings {
         prefs.edit().putString(KEY_EQ_BANDS, clamped.joinToString(",")).apply()
     }
 
+    /**
+     * Moves one band, leaving the other nine where they are.
+     *
+     * The read-modify-write belongs here rather than at the fader, and that is
+     * the whole reason this exists. A caller that builds the new row from a
+     * curve it captured earlier writes back nine *stale* bands along with the
+     * one it meant to change — and a `pointerInput` block is exactly such a
+     * caller, because it is launched once and goes on running with whatever it
+     * closed over. So dragging a second fader silently reset the first, every
+     * band after the first was the only one left set, and an equalizer that was
+     * working perfectly well sounded like it was barely doing anything.
+     *
+     * Reading [equalizerBands] at call time cannot go stale: there is no
+     * snapshot to be holding.
+     */
+    fun setEqualizerBand(band: Int, db: Float) {
+        if (band !in 0 until EQ_BANDS) return
+        setEqualizerBands(equalizerBands.value.copyOf().also { it[band] = db })
+    }
+
     fun setEqualizerPreamp(value: Float) {
         val clamped = value.coerceIn(-EQ_MAX_DB, EQ_MAX_DB)
         equalizerPreamp.value = clamped
