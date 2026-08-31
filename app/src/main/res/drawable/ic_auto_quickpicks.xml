@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?><!--
+  Tab glyph for the Android Auto browse tree. A drawable rather than a Compose
+  icon because Auto reads them as android.resource:// URIs across the session,
+  and nothing in this app's Compose icon set can be named that way.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="?attr/colorControlNormal">
+    <path
+        android:fillColor="@android:color/white"
+        android:pathData="M10,20v-6h4v6h5v-8h3L12,3 2,12h3v8z" />
+</vector>

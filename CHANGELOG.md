@@ -4,6 +4,19 @@ This file records user-facing changes. Development details still live in the Git
 
 ## Unreleased
 
+## 1.0.4 - 2026-08-31
+
+### Added
+
+- Android Auto. Avyra now appears in the car and is browsed there directly: Downloads first, so it works with no signal, then Recent, and — when signed in — Library and Quick picks. Tapping a song plays the list it came from rather than that song alone, voice search reaches downloads before the network, and the steering-wheel play button resumes the last queue even when the app was never opened on the phone.
+
+## 1.0.3 - 2026-08-31
+
+### Changed
+
+- Redesigned the update screen. It was built as a system alert — the narrow, two-button kind meant for a single sentence — and was being asked to show a whole release changelog, so the notes came out cramped and their headings were set larger than the screen's own title. It is now a full-screen page in the shape of iOS Software Update: the version and its state at the top, the release notes in a panel sized to be read, and the actions along the bottom.
+- A download now shows its percentage as well as its progress bar.
+
 ## 1.0.2 - 2026-08-31
 
 ### Fixed
