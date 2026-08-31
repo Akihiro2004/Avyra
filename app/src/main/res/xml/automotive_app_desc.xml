@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Declares this app to Android Auto as a media app.
+
+  Without this file, and the meta-data entry in the manifest that points at it,
+  Auto never looks for a browse service here at all — the app simply does not
+  appear in the car's app list, however complete the MediaLibraryService is.
+-->
+<automotiveApp>
+    <uses name="media" />
+</automotiveApp>

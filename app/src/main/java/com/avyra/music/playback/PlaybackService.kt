@@ -33,12 +33,19 @@ import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
 import androidx.media3.session.CommandButton
 import androidx.media3.session.DefaultMediaNotificationProvider
+import androidx.media3.session.LibraryResult
+import androidx.media3.session.MediaLibraryService
+import androidx.media3.session.MediaLibraryService.LibraryParams
+import androidx.media3.session.MediaLibraryService.MediaLibrarySession
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionError
 import androidx.media3.session.SessionResult
 import com.google.common.util.concurrent.Futures
+import com.google.common.util.concurrent.SettableFuture
+import com.google.common.collect.ImmutableList
+import com.avyra.music.playback.auto.AutoLibrary
 import com.google.common.util.concurrent.ListenableFuture
 import com.avyra.music.MainActivity
 import com.avyra.music.R
@@ -98,9 +105,15 @@ const val ACTION_TOGGLE_AUTOPLAY = "com.avyra.music.action.TOGGLE_AUTOPLAY"
 const val ACTION_TOGGLE_SHUFFLE = "com.avyra.music.action.TOGGLE_SHUFFLE"
 
 /**
- * Background playback via Media3. A [MediaSessionService] gives us the media
- * notification, lockscreen/Bluetooth controls, and Android Auto surface for
- * free; UI processes attach with a MediaController.
+ * Background playback via Media3. A [MediaLibraryService] gives us the media
+ * notification, lockscreen and Bluetooth controls, and — because it is the
+ * library flavour rather than a plain [MediaSessionService] — the browse tree
+ * Android Auto reads. UI processes attach with a MediaController.
+ *
+ * Auto is not a second UI. It binds this service in whatever process happens to
+ * be running, with no Activity involved at all, and draws [AutoLibrary]'s tree
+ * with its own templates. That is why nothing below may assume the app has been
+ * opened: a car can be the first thing to start this process all day.
  *
  * Queue items carry a `avyra://watch?v=<videoId>` URI. The actual stream
  * URL is resolved lazily by [ResolvingDataSource] the moment ExoPlayer opens
@@ -111,9 +124,9 @@ const val ACTION_TOGGLE_SHUFFLE = "com.avyra.music.action.TOGGLE_SHUFFLE"
  * whole life; [CrossfadeController] rides on top of it as volume automation.
  */
 @UnstableApi
-class PlaybackService : MediaSessionService() {
+class PlaybackService : MediaLibraryService() {
 
-    private var mediaSession: MediaSession? = null
+    private var mediaSession: MediaLibrarySession? = null
 
     /**
      * The player the session is on. Swaps with [spare] at every crossfade — see
@@ -253,14 +266,21 @@ class PlaybackService : MediaSessionService() {
      */
     private val sessionSongHistory = mutableListOf<Song>()
 
-    private val sessionCallback = object : MediaSession.Callback {
+    private val sessionCallback = object : MediaLibrarySession.Callback {
         override fun onConnect(
             session: MediaSession,
             controller: MediaSession.ControllerInfo,
         ): MediaSession.ConnectionResult {
             // The media notification controller is a normal Media3 controller. Its custom
             // buttons are omitted unless their commands are explicitly available.
-            val commands = MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS
+            //
+            // The *library* half of this default is what Android Auto needs and
+            // what a plain DEFAULT_SESSION_COMMANDS leaves out. Granting the
+            // session commands alone is not a visible failure: the browser
+            // still connects, the app still appears in the car, and then every
+            // browse comes back PERMISSION_DENIED, which Auto draws as an app
+            // that opens onto nothing.
+            val commands = MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS
                 .buildUpon()
                 .add(favoriteCommand)
                 .add(autoplayCommand)
@@ -291,7 +311,191 @@ class PlaybackService : MediaSessionService() {
             // the notification is refreshed when the network write completes.
             return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
         }
+
+        // ---- Android Auto's browse tree ---------------------------------
+        //
+        // Everything below answers a car rather than this app's own UI. The
+        // tree itself lives in [AutoLibrary]; what is here is the plumbing that
+        // turns a suspending lookup into the futures Media3 asks for, and the
+        // one genuinely subtle part - rebuilding a playable queue out of the
+        // media ids Auto hands back.
+
+        override fun onGetLibraryRoot(
+            session: MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            params: LibraryParams?,
+        ): ListenableFuture<LibraryResult<MediaItem>> =
+            Futures.immediateFuture(LibraryResult.ofItem(AutoLibrary.root(), params))
+
+        override fun onGetChildren(
+            session: MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            parentId: String,
+            page: Int,
+            pageSize: Int,
+            params: LibraryParams?,
+        ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> = libraryFuture {
+            val children = AutoLibrary.children(this@PlaybackService, parentId)
+            LibraryResult.ofItemList(children.page(page, pageSize), params)
+        }
+
+        override fun onGetItem(
+            session: MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            mediaId: String,
+        ): ListenableFuture<LibraryResult<MediaItem>> = libraryFuture {
+            AutoLibrary.item(this@PlaybackService, mediaId)
+                ?.let { LibraryResult.ofItem(it, null) }
+                ?: LibraryResult.ofError(SessionError.ERROR_BAD_VALUE)
+        }
+
+        /**
+         * Voice search. Auto asks how much was found first and for the rows
+         * second, so this half runs the search and only reports the count.
+         */
+        override fun onSearch(
+            session: MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            query: String,
+            params: LibraryParams?,
+        ): ListenableFuture<LibraryResult<Void>> = libraryFuture {
+            val hits = AutoLibrary.search(this@PlaybackService, query)
+            session.notifySearchResultChanged(browser, query, hits.size, params)
+            LibraryResult.ofVoid()
+        }
+
+        override fun onGetSearchResult(
+            session: MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            query: String,
+            page: Int,
+            pageSize: Int,
+            params: LibraryParams?,
+        ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> = libraryFuture {
+            val hits = AutoLibrary.search(this@PlaybackService, query)
+            LibraryResult.ofItemList(AutoLibrary.items(hits).page(page, pageSize), params)
+        }
+
+        /**
+         * Turns whatever a controller sent into something the player can open.
+         *
+         * The app's own UI is unaffected: an item it sends still carries the
+         * URI [Song.toMediaItem] built for it, and is passed through untouched.
+         * Auto's do not - Media3 strips a media item's local configuration on
+         * the way across, so what arrives from a car is an id and some metadata
+         * - and those are rebuilt from the track [AutoLibrary] served under that
+         * id.
+         *
+         * An id neither route can account for is dropped rather than queued: an
+         * entry with no URI fails when the player opens it, which in a car is
+         * several seconds after the tap and reads as the track being broken.
+         */
+        override fun onAddMediaItems(
+            mediaSession: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            mediaItems: MutableList<MediaItem>,
+        ): ListenableFuture<MutableList<MediaItem>> =
+            Futures.immediateFuture(mediaItems.mapNotNull(::playable).toMutableList())
+
+        /**
+         * The same, plus the thing that makes tapping a row in a car behave.
+         *
+         * Auto sends exactly the one row that was tapped, so taken literally a
+         * tap yields a queue of length one and playback stops at the end of it.
+         * What the driver meant was the list they were looking at, played from
+         * there - so a single unresolved row is expanded back into the list
+         * [AutoLibrary] last served, started at that row's own position.
+         */
+        override fun onSetMediaItems(
+            mediaSession: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            mediaItems: MutableList<MediaItem>,
+            startIndex: Int,
+            startPositionMs: Long,
+        ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
+            if (mediaItems.size == 1 && mediaItems[0].localConfiguration == null) {
+                AutoLibrary.queueFor(mediaItems[0].mediaId)?.let { (songs, index) ->
+                    return Futures.immediateFuture(
+                        MediaSession.MediaItemsWithStartPosition(
+                            songs.map { it.toMediaItem() },
+                            index,
+                            startPositionMs,
+                        ),
+                    )
+                }
+            }
+            return Futures.immediateFuture(
+                MediaSession.MediaItemsWithStartPosition(
+                    mediaItems.mapNotNull(::playable),
+                    startIndex,
+                    startPositionMs,
+                ),
+            )
+        }
+
+        /**
+         * Play, pressed with nothing queued.
+         *
+         * The cold-car case: the phone has been rebooted, or the process was
+         * reclaimed, and the first thing to touch this app all day is a
+         * steering-wheel button. [restoreLastQueue] usually has the player
+         * loaded before anything asks, but it cannot when there is no player
+         * yet - so the saved queue is offered again here, from where it stopped.
+         */
+        override fun onPlaybackResumption(
+            mediaSession: MediaSession,
+            controller: MediaSession.ControllerInfo,
+        ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
+            val last = LastPlayed.load()
+                ?: return Futures.immediateFailedFuture(
+                    UnsupportedOperationException("Nothing has been played yet"),
+                )
+            return Futures.immediateFuture(
+                MediaSession.MediaItemsWithStartPosition(
+                    last.songs.map { it.toMediaItem() },
+                    last.index,
+                    last.positionMs,
+                ),
+            )
+        }
+
+        private fun playable(item: MediaItem): MediaItem? = when {
+            item.localConfiguration != null -> item
+            else -> AutoLibrary.songFor(item.mediaId)?.toMediaItem()
+        }
     }
+
+    /**
+     * Runs a suspending library lookup on the service's own scope and hands
+     * Media3 the future it asked for.
+     *
+     * A browse can go to the network, and the binder thread Auto calls on is
+     * not the place to wait for one - a slow answer there stalls the car's UI
+     * rather than this app's. A failure becomes an error result rather than an
+     * exception, because an exception here surfaces in the car as this app
+     * having crashed.
+     */
+    private fun <T : Any> libraryFuture(
+        block: suspend () -> LibraryResult<T>,
+    ): ListenableFuture<LibraryResult<T>> {
+        val future = SettableFuture.create<LibraryResult<T>>()
+        scope.launch {
+            val result = runCatching { block() }.getOrElse { error ->
+                TrackLog.w("Avyra", "Auto browse failed: " + error.message)
+                LibraryResult.ofError(SessionError.ERROR_UNKNOWN)
+            }
+            future.set(result)
+        }
+        return future
+    }
+
+    /** The slice Auto asked for, tolerant of the page size it sometimes sends. */
+    private fun List<MediaItem>.page(page: Int, pageSize: Int): ImmutableList<MediaItem> =
+        if (pageSize <= 0) {
+            ImmutableList.copyOf(this)
+        } else {
+            ImmutableList.copyOf(drop(page * pageSize).take(pageSize))
+        }
 
     /**
      * Everything the service books against the player it is currently on.
@@ -627,6 +831,12 @@ class PlaybackService : MediaSessionService() {
     override fun onCreate() {
         super.onCreate()
 
+        // Which package this build installs as, for the browse tree's icons.
+        // Here rather than lazily, because the first thing to ask this service
+        // for anything may be a car, and by then there is no other Context in
+        // reach — see [AutoLibrary.init].
+        AutoLibrary.init(this)
+
         // First, because everything below assumes it is standing up fresh and
         // one of the two ways this service starts does not give it that.
         //
@@ -910,10 +1120,13 @@ class PlaybackService : MediaSessionService() {
         crossfade = controller
         controller.start()
 
-        mediaSession = MediaSession.Builder(this, SessionPlayer(exoPlayer, controller))
+        mediaSession = MediaLibrarySession.Builder(
+            this,
+            SessionPlayer(exoPlayer, controller),
+            sessionCallback,
+        )
             .setId(SESSION_ID)
             .setSessionActivity(sessionActivity())
-            .setCallback(sessionCallback)
             .build()
         mediaSession?.setCustomLayout(notificationButtons())
     }
@@ -3284,7 +3497,7 @@ class PlaybackService : MediaSessionService() {
         }
     }
 
-    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? =
+    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? =
         mediaSession
 
     /**

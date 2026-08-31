@@ -8,9 +8,14 @@ import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import com.avyra.music.BuildConfig
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -19,6 +24,7 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.Request
 import java.io.File
+import java.io.FileOutputStream
 
 /**
  * Avyra ships as a sideloaded APK rather than through a store, so nothing
@@ -95,6 +101,19 @@ object AppUpdateChecker {
     /** Set from the UI thread when the user cancels; polled between network reads. */
     @Volatile
     private var downloadCancelled = false
+
+    /**
+     * The download's own scope, deliberately not the caller's — see
+     * [downloadApk] for why that distinction is the whole fix.
+     */
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    @Volatile
+    private var job: Job? = null
+
+    /** Attempts per download, and the base gap between them. */
+    private const val ATTEMPTS = 4
+    private const val RETRY_DELAY_MS = 1_500L
 
     /**
      * The silent poll at launch. Publishes an update if there is one and says
@@ -180,52 +199,120 @@ object AppUpdateChecker {
      * through [download]. A finished file survives a cancelled dialog: until
      * the state is reset, "Install Now" comes straight back without a second
      * download.
+     *
+     * Runs on this object's own [scope] rather than the caller's, and that is
+     * the point rather than a detail. Both callers are composables — one a
+     * `LaunchedEffect`, one a `rememberCoroutineScope` — so anything that left
+     * that composition cancelled the download along with it, closing the socket
+     * out from under a read already in flight. Eighty megabytes into a hundred,
+     * that arrives as "Software caused connection abort" and reads as the
+     * download having simply given up. Nothing on screen can interrupt it now;
+     * [cancelDownload] is the only way to stop it.
+     *
+     * Single-flight, for a race the two callers made easy to hit: a manual
+     * check that finds an update starts this *and* opens the dialog offering a
+     * Download button, so tapping it started a second copy that deleted the
+     * first one's half-written file out from under it.
      */
-    suspend fun downloadApk(context: Context): Unit = withContext(Dispatchers.IO) {
-        val info = _available.value ?: return@withContext
-        val url = info.apkUrl ?: return@withContext
+    fun downloadApk(context: Context) {
+        if (job?.isActive == true) return
+        // The activity that asked for this can be long gone before it finishes.
+        val app = context.applicationContext
         downloadCancelled = false
         _download.value = DownloadState.Downloading(0f)
+        job = scope.launch { runDownload(app) }
+    }
 
-        runCatching {
-            val dir = File(context.cacheDir, CACHE_SUBDIR).apply { mkdirs() }
-            // Drop anything left over from an earlier attempt.
-            dir.listFiles()?.forEach { it.delete() }
-            val target = File(dir, "avyra-${info.version}.apk")
+    /**
+     * One attempt per pass, each resuming where the last one stopped.
+     *
+     * The asset is around a hundred megabytes and phones drop connections. A
+     * single unresumable stream that size fails often enough on mobile data to
+     * look broken rather than unlucky, so a dropped one is picked up instead of
+     * restarted — GitHub's asset host advertises `Accept-Ranges: bytes`.
+     *
+     * Each attempt re-requests the release URL rather than whatever it
+     * redirected to last time: that redirect lands on a signed URL carrying an
+     * expiry, and reusing it is how a retry earns itself a 403.
+     *
+     * The partial file is left behind on failure deliberately. It is what the
+     * next attempt resumes from, and [clearCache] clears it at the next cold
+     * start regardless.
+     */
+    private suspend fun runDownload(context: Context) {
+        val info = _available.value ?: return
+        val url = info.apkUrl ?: return
+        val dir = File(context.cacheDir, CACHE_SUBDIR).apply { mkdirs() }
+        val target = File(dir, "avyra-${info.version}.apk")
+        // Anything else in here belongs to a version no longer being offered.
+        dir.listFiles()?.forEach { if (it != target) it.delete() }
 
-            val request = Request.Builder().url(url).build()
-            Http.client.newCall(request).execute().use { response ->
-                check(response.isSuccessful) { "Download failed: HTTP ${response.code}" }
-                val body = response.body ?: error("Empty download body")
-                val total = body.contentLength().takeIf { it > 0 }
+        var lastError: Throwable? = null
+        for (attempt in 1..ATTEMPTS) {
+            if (downloadCancelled) break
+            val outcome = runCatching { fetchInto(target, url) }
+            if (outcome.isSuccess) {
+                _download.value =
+                    if (downloadCancelled) DownloadState.Idle else DownloadState.Ready(target)
+                return
+            }
+            lastError = outcome.exceptionOrNull()
+            TrackLog.w(TAG, "update download attempt $attempt failed: ${lastError?.message}")
+            if (downloadCancelled || attempt == ATTEMPTS) break
+            delay(RETRY_DELAY_MS * attempt)
+        }
 
+        _download.value = if (downloadCancelled) {
+            DownloadState.Idle
+        } else {
+            DownloadState.Failed(lastError?.message ?: "Download failed")
+        }
+    }
+
+    /** Throws unless [target] is left holding the whole asset. */
+    internal fun fetchInto(target: File, url: String) {
+        val have = target.length()
+        val request = Request.Builder().url(url)
+            .apply { if (have > 0) header("Range", "bytes=$have-") }
+            .build()
+
+        Http.client.newCall(request).execute().use { response ->
+            check(response.isSuccessful) { "Download failed: HTTP ${response.code}" }
+            // 206 is the tail of the file and appends. Any other success is the
+            // whole thing again — the server ignored the range — so the partial
+            // has to be overwritten rather than added to.
+            val resumed = response.code == 206 && have > 0
+            val body = response.body ?: error("Empty download body")
+            val length = body.contentLength()
+            val total = if (resumed && length > 0) have + length else length
+
+            var written = if (resumed) have else 0L
+            FileOutputStream(target, resumed).use { output ->
                 body.byteStream().use { input ->
-                    target.outputStream().use { output ->
-                        val buffer = ByteArray(64 * 1024)
-                        var readTotal = 0L
-                        while (true) {
-                            if (downloadCancelled) {
-                                _download.value = DownloadState.Idle
-                                return@withContext
-                            }
-                            val read = input.read(buffer)
-                            if (read == -1) break
-                            output.write(buffer, 0, read)
-                            readTotal += read
-                            total?.let {
-                                _download.value =
-                                    DownloadState.Downloading((readTotal.toFloat() / it).coerceIn(0f, 1f))
-                            }
+                    val buffer = ByteArray(64 * 1024)
+                    while (true) {
+                        if (downloadCancelled) break
+                        val read = input.read(buffer)
+                        if (read == -1) break
+                        output.write(buffer, 0, read)
+                        written += read
+                        if (total > 0) {
+                            _download.value = DownloadState.Downloading(
+                                (written.toFloat() / total).coerceIn(0f, 1f),
+                            )
                         }
                     }
                 }
             }
-            _download.value = DownloadState.Ready(target)
-        }.onFailure { error ->
-            _download.value = if (downloadCancelled) {
-                DownloadState.Idle
-            } else {
-                DownloadState.Failed(error.message ?: "Download failed")
+            // Belt and braces rather than the main defence. A body that stops
+            // short of its own Content-Length is caught by OkHttp first, which
+            // is the case GitHub's asset host produces; this covers the one it
+            // cannot see, where the length was never announced and a stream
+            // that ends early is indistinguishable from one that finished. A
+            // short file here would reach the installer as a corrupt package,
+            // reported as a bad APK rather than as a failed download.
+            check(downloadCancelled || total <= 0 || written >= total) {
+                "Download stopped at $written of $total bytes"
             }
         }
     }

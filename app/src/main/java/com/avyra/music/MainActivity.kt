@@ -2452,7 +2452,7 @@ private fun AvyraApp(
                     onDismiss = { showUpdateDialog = false },
                     onDownload = {
                         if (update.apkUrl != null) {
-                            scope.launch { AppUpdateChecker.downloadApk(context) }
+                            AppUpdateChecker.downloadApk(context)
                         } else {
                             context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(update.releaseUrl)))
                             showUpdateDialog = false

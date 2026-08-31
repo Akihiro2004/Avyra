@@ -641,6 +641,8 @@ class SourcesTest {
         private val answerAfterMs: Long,
         private val format: StreamFormat?,
         override val kind: SourceKind = SourceKind.JIOSAAVN,
+        /** What its listing claims the recording runs to — the one field a title cannot fake. */
+        private val duration: String = "2:00",
     ) : MusicSource {
         override val configId = displayName
         var asked = false
@@ -665,7 +667,7 @@ class SourcesTest {
                     title = RACE_TITLE,
                     artist = RACE_ARTIST,
                     thumbnailUrl = null,
-                    durationText = "2:00",
+                    durationText = duration,
                 ),
             )
         }
@@ -675,6 +677,81 @@ class SourcesTest {
     }
 
     private fun raceTarget() = TrackMatcher.Target(RACE_TITLE, RACE_ARTIST, durationSec = 120)
+
+    // ---- Substituting a different file under the listener's row -------------
+
+    /**
+     * The "right row, wrong song" fault: the list keeps YouTube's title, artist
+     * and cover, and the audio is a different recording entirely.
+     *
+     * Everything a substitution is decided on is text, and text is what two
+     * recordings of a song routinely agree on — a re-record, a film's second
+     * version, a compilation cut, a mislabelled catalogue row. The title core
+     * matches, the version markers match, the credit matches, and it is not the
+     * track that was asked for. Runtime is the only field that separates them,
+     * so the search that chooses what plays has to insist on it.
+     */
+    @Test
+    fun `a strict search refuses a same-titled recording of a different length`() = runBlocking {
+        val impostor = FakeSource(
+            "JioSaavn",
+            answerAfterMs = 5,
+            format = StreamFormat("mp4", kbps = 320),
+            duration = "2:04",
+        )
+        assertNull(
+            SourceResolver.bestAcross(
+                listOf(impostor), raceTarget(), StreamRequest.Lossless, strictLength = true,
+            ),
+        )
+
+        // The same candidate, ungated, is accepted — which is what the reported
+        // fault was made of, and what stops the assertion above being vacuous.
+        // [TrackMatcher] alone tolerates 30s of drift, and nothing else in the
+        // listing disagrees.
+        assertEquals(
+            "JioSaavn",
+            SourceResolver.bestAcross(
+                listOf(impostor), raceTarget(), StreamRequest.Lossless,
+            )?.first?.displayName,
+        )
+
+        // And takes the copy that does agree, so the gate costs nothing real.
+        val real = FakeSource(
+            "JioSaavn",
+            answerAfterMs = 5,
+            format = StreamFormat("mp4", kbps = 320),
+            duration = "2:00",
+        )
+        assertEquals(
+            "JioSaavn",
+            SourceResolver.bestAcross(
+                listOf(real), raceTarget(), StreamRequest.Lossless, strictLength = true,
+            )?.first?.displayName,
+        )
+    }
+
+    /**
+     * A row that never carried a runtime — a watch-queue entry, an AutoPlay
+     * suggestion — cannot be checked against anything, so a strict search finds
+     * nothing however well the titles read.
+     *
+     * Which is why the substitution paths refuse an untimed row up front rather
+     * than paying for a search that cannot succeed: an unverifiable match is
+     * not a near miss, it is the wrong song with nothing to catch it.
+     */
+    @Test
+    fun `a strict search has nothing to check an untimed row against`() = runBlocking {
+        val source = FakeSource("JioSaavn", answerAfterMs = 5, format = StreamFormat("mp4", kbps = 320))
+        assertNull(
+            SourceResolver.bestAcross(
+                listOf(source),
+                TrackMatcher.Target(RACE_TITLE, RACE_ARTIST),
+                StreamRequest.Lossless,
+                strictLength = true,
+            ),
+        )
+    }
 
     /**
      * The '9:45' case itself, as a race rather than a queue.

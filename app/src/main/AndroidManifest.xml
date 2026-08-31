@@ -186,6 +186,14 @@
             android:foregroundServiceType="mediaPlayback">
             <intent-filter>
                 <action android:name="androidx.media3.session.MediaSessionService" />
+                <!--
+                  What Android Auto actually looks for. Auto speaks the older
+                  MediaBrowserService protocol, which Media3's MediaLibraryService
+                  answers on this same binder - but only if the filter names it,
+                  and without it the app is invisible in a car however complete
+                  the browse tree is.
+                -->
+                <action android:name="android.media.browse.MediaBrowserService" />
             </intent-filter>
         </service>
 
@@ -197,6 +205,15 @@
             android:name=".download.DownloadService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!--
+          Declares this app to Android Auto as a media app. Points at
+          res/xml/automotive_app_desc.xml; without it Auto never asks the
+          service above for anything.
+        -->
+        <meta-data
+            android:name="com.google.android.gms.car.application"
+            android:resource="@xml/automotive_app_desc" />
 
         <!--
           Home-screen widgets. Two providers so the picker lists a 2×2 and a 4×2,
