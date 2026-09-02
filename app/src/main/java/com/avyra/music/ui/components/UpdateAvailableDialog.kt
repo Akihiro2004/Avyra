@@ -49,13 +49,11 @@ import com.halilibo.richtext.ui.ListStyle
 import com.halilibo.richtext.ui.RichTextStyle
 import com.halilibo.richtext.ui.material3.RichText
 import com.avyra.music.R
-import com.avyra.music.data.AppUpdateChecker
 import com.avyra.music.data.settings.AppSettings
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeEffect
 import dev.chrisbanes.haze.materials.ExperimentalHazeMaterialsApi
 import dev.chrisbanes.haze.materials.HazeMaterials
-import kotlin.math.roundToInt
 
 /** UIAlertController's own metrics: fixed narrow width, 14pt corner, 44pt rows. */
 internal val ALERT_WIDTH = 270.dp
@@ -88,7 +86,6 @@ private val CLOSE_BUTTON = 30.dp
 /** iOS system blue, the same one the settings screen's tiles use. */
 private val UPDATE_TINT = Color(0xFF0A84FF)
 
-private val PROGRESS_HEIGHT = 6.dp
 private val PRIMARY_BUTTON_HEIGHT = 50.dp
 
 /**
@@ -103,10 +100,9 @@ private val PRIMARY_BUTTON_HEIGHT = 50.dp
  * The page scrolls as one piece and the dock stays put, so a long changelog
  * never pushes the buttons out of reach.
  *
- * The update round trip happens here rather than in a browser: Download pulls
- * the release's APK into the app cache (progress fills the bar under the
- * title), then Install hands it to the system installer. Where the release
- * carries no APK at all, the actions fall back to opening the releases page.
+ * Download opens Avyra's official release page in the browser. Keeping the APK
+ * and package installer outside the music app avoids Android's high-risk
+ * installer permission while leaving the system in control of confirmation.
  *
  * Back closes it, handled by the caller alongside the flag that shows it.
  *
@@ -122,15 +118,10 @@ fun UpdateAvailableDialog(
     notes: String?,
     hazeState: HazeState,
     onDismiss: () -> Unit,
-    onDownload: () -> Unit,
-    onCancelDownload: () -> Unit,
-    onInstall: () -> Unit,
     onOpenReleasePage: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val reduceDynamicBlur by AppSettings.reduceDynamicBlur.collectAsStateWithLifecycle()
-    val state by AppUpdateChecker.download.collectAsStateWithLifecycle()
-
     // The notes pass under the close row as well as under the dock, so the top
     // needs the same hairline the bottom has — but only once there is something
     // above to divide it from, which is how an iOS nav bar earns its rule.
@@ -183,7 +174,7 @@ fun UpdateAvailableDialog(
                     .padding(horizontal = PAGE_INSET),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                UpdateHeader(version = version, state = state)
+                UpdateHeader(version = version)
 
                 // The release's own notes, rendered as Markdown rather than
                 // dumped as raw text — GitHub release bodies lean on headings,
@@ -202,11 +193,7 @@ fun UpdateAvailableDialog(
             AlertRule()
 
             UpdateActions(
-                state = state,
                 onDismiss = onDismiss,
-                onDownload = onDownload,
-                onCancelDownload = onCancelDownload,
-                onInstall = onInstall,
                 onOpenReleasePage = onOpenReleasePage,
             )
         }
@@ -217,7 +204,6 @@ fun UpdateAvailableDialog(
 @Composable
 private fun UpdateHeader(
     version: String,
-    state: AppUpdateChecker.DownloadState,
 ) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Spacer(Modifier.height(12.dp))
@@ -253,16 +239,7 @@ private fun UpdateHeader(
             textAlign = TextAlign.Center,
         )
         Text(
-            text = when (state) {
-                is AppUpdateChecker.DownloadState.Downloading ->
-                    stringResource(R.string.update_downloading_body, version)
-                is AppUpdateChecker.DownloadState.Ready ->
-                    stringResource(R.string.update_ready_body, version)
-                is AppUpdateChecker.DownloadState.Failed ->
-                    stringResource(R.string.update_failed_body, version)
-                else ->
-                    stringResource(R.string.update_available_body, version)
-            },
+            text = stringResource(R.string.update_available_body, version),
             modifier = Modifier.padding(top = 8.dp),
             style = MaterialTheme.typography.bodyLarge.copy(
                 fontSize = 15.sp,
@@ -272,51 +249,6 @@ private fun UpdateHeader(
             textAlign = TextAlign.Center,
         )
 
-        // The percentage is the only number anywhere in this flow, and a
-        // hundred-megabyte download without one is indistinguishable from a
-        // stalled one — which is exactly how the last broken version read.
-        val downloading = state as? AppUpdateChecker.DownloadState.Downloading
-        if (downloading != null) {
-            Spacer(Modifier.height(24.dp))
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .height(PROGRESS_HEIGHT)
-                    .clip(RoundedCornerShape(PROGRESS_HEIGHT / 2))
-                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)),
-            ) {
-                if (downloading.fraction > 0f) {
-                    Box(
-                        Modifier
-                            .fillMaxWidth(downloading.fraction)
-                            .height(PROGRESS_HEIGHT)
-                            .clip(RoundedCornerShape(PROGRESS_HEIGHT / 2))
-                            .background(UPDATE_TINT),
-                    )
-                }
-            }
-            Text(
-                text = "${(downloading.fraction * 100).roundToInt()}%",
-                modifier = Modifier.padding(top = 10.dp),
-                style = MaterialTheme.typography.bodyMedium.copy(
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.W500,
-                ),
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
-            )
-        }
-        if (state is AppUpdateChecker.DownloadState.Failed) {
-            Text(
-                text = state.message,
-                modifier = Modifier.padding(top = 14.dp),
-                style = MaterialTheme.typography.bodyMedium.copy(
-                    fontSize = 13.sp,
-                    lineHeight = 18.sp,
-                ),
-                color = MaterialTheme.colorScheme.error,
-                textAlign = TextAlign.Center,
-            )
-        }
     }
 }
 
@@ -417,11 +349,7 @@ private fun ReleaseNotes(notes: String) {
  */
 @Composable
 private fun UpdateActions(
-    state: AppUpdateChecker.DownloadState,
     onDismiss: () -> Unit,
-    onDownload: () -> Unit,
-    onCancelDownload: () -> Unit,
-    onInstall: () -> Unit,
     onOpenReleasePage: () -> Unit,
 ) {
     Column(
@@ -431,23 +359,8 @@ private fun UpdateActions(
             .padding(top = 14.dp, bottom = 12.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        when (state) {
-            is AppUpdateChecker.DownloadState.Downloading -> {
-                TextAction(label = stringResource(R.string.cancel), onClick = onCancelDownload)
-            }
-            is AppUpdateChecker.DownloadState.Ready -> {
-                FilledAction(label = stringResource(R.string.install_now), onClick = onInstall)
-                TextAction(label = stringResource(R.string.later), onClick = onDismiss)
-            }
-            is AppUpdateChecker.DownloadState.Failed -> {
-                FilledAction(label = stringResource(R.string.try_again), onClick = onDownload)
-                TextAction(label = stringResource(R.string.open_releases_page), onClick = onOpenReleasePage)
-            }
-            else -> {
-                FilledAction(label = stringResource(R.string.download_now), onClick = onDownload)
-                TextAction(label = stringResource(R.string.remind_me_later), onClick = onDismiss)
-            }
-        }
+        FilledAction(label = stringResource(R.string.open_releases_page), onClick = onOpenReleasePage)
+        TextAction(label = stringResource(R.string.remind_me_later), onClick = onDismiss)
     }
 }
 
