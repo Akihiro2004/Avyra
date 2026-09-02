@@ -9,6 +9,7 @@ import android.os.Handler
 import android.os.Looper
 import androidx.core.content.ContextCompat
 import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.avyra.music.playback.PlaybackService
@@ -31,6 +32,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  * a cold app can *show* where you left off without pulling a stream for a track
  * nobody has asked for yet — so that is done here, at the point somebody has.
  */
+@androidx.annotation.OptIn(UnstableApi::class)
 class MediaWidgetActions : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {

@@ -6,6 +6,7 @@ import android.os.Bundle
 import androidx.annotation.DrawableRes
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaConstants
 import com.avyra.music.R
 import com.avyra.music.data.YtMusicRepository
@@ -39,6 +40,7 @@ import java.util.concurrent.ConcurrentHashMap
  * all when there isn't one — an empty tab a driver taps twice to discover is
  * worse than a tab that was never there.
  */
+@androidx.annotation.OptIn(UnstableApi::class)
 object AutoLibrary {
 
     // ---- Ids -----------------------------------------------------------

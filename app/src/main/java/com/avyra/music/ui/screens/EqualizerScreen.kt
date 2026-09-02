@@ -43,6 +43,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.media3.common.util.UnstableApi
 import com.avyra.music.data.settings.AppSettings
 import com.avyra.music.playback.EqualizerProcessor
 import com.avyra.music.ui.components.PAGE_GUTTER
@@ -65,6 +66,7 @@ import com.avyra.music.ui.components.avyraSwitchColors
  * already knows how to read it.
  */
 @Composable
+@androidx.annotation.OptIn(UnstableApi::class)
 fun EqualizerScreen(
     contentPadding: PaddingValues,
     modifier: Modifier = Modifier,
@@ -258,6 +260,7 @@ private fun PresetRow(
  * the whole curve has to be visible at once or the shape stops being readable,
  * which is the only reason to draw it this way instead of listing numbers.
  */
+@androidx.annotation.OptIn(UnstableApi::class)
 @Composable
 private fun BandRow(
     gains: FloatArray,
@@ -314,6 +317,7 @@ private fun BandRow(
  * the wrong axis and its semantics report a horizontal control, which is worse
  * for anyone using a screen reader than a purpose-built one.
  */
+@androidx.annotation.OptIn(UnstableApi::class)
 @Composable
 private fun BandFader(
     db: Float,

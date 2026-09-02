@@ -107,7 +107,8 @@ android {
         create("dev") {
             dimension = "env"
             applicationIdSuffix = ".dev"
-            resValue("string", "app_name", "Avyra")
+            versionNameSuffix = "-dev"
+            resValue("string", "app_name_dev", "Avyra Dev")
         }
         create("prod") {
             dimension = "env"
