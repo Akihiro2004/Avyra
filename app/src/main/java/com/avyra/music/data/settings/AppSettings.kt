@@ -203,7 +203,16 @@ object AppSettings {
     val reduceAnimation = MutableStateFlow(false)
 
     /** Stop playback when the app is swiped away from the recent apps screen. */
-    val stopOnTaskRemoved = MutableStateFlow(false)
+    /**
+     * Default on: closing the app is expected to close the music with it.
+     *
+     * Not the platform default, which is to keep playing — that suits an app
+     * people leave running all day and surprises everyone else. A listener who
+     * wants the old behaviour turns this off; one who does not never has to
+     * find out it exists. See `PlaybackService.onTaskRemoved`, which ignores it
+     * entirely while a car is connected.
+     */
+    val stopOnTaskRemoved = MutableStateFlow(true)
 
     /** Hides the volume slider on the main player, leaving the rest of the layout to reflow. */
     val hideVolumeBar = MutableStateFlow(false)
@@ -488,7 +497,7 @@ object AppSettings {
         autoplay.value = prefs.getBoolean(KEY_AUTOPLAY, true)
         showNerdStats.value = prefs.getBoolean(KEY_NERD_STATS, false)
         reduceAnimation.value = prefs.getBoolean(KEY_REDUCE_ANIMATION, false)
-        stopOnTaskRemoved.value = prefs.getBoolean(KEY_STOP_ON_TASK_REMOVED, false)
+        stopOnTaskRemoved.value = prefs.getBoolean(KEY_STOP_ON_TASK_REMOVED, true)
         hideVolumeBar.value = prefs.getBoolean(KEY_HIDE_VOLUME_BAR, false)
         swipeToPlayNext.value = prefs.getBoolean(KEY_SWIPE_TO_PLAY_NEXT, false)
         dontRepeatSuggestions.value = prefs.getBoolean(KEY_DONT_REPEAT_SUGGESTIONS, false)

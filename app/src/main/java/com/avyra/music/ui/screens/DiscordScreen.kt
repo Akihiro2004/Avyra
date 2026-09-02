@@ -5,6 +5,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -160,7 +161,12 @@ fun DiscordScreen(
 
     Column(
         modifier = modifier
-            .fillMaxWidth()
+            // Full height and opaque, which matters only while this page is
+            // sliding: a page with no background of its own lets the one it is
+            // covering show straight through it. The colour is the one the root
+            // already paints, so nothing changes once it has arrived.
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
             .verticalScroll(rememberScrollState())
             .padding(contentPadding),
     ) {

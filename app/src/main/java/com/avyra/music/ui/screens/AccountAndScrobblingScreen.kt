@@ -1,5 +1,7 @@
 package com.avyra.music.ui.screens
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
@@ -58,7 +60,12 @@ fun AccountAndScrobblingScreen(
 
     Column(
         modifier = modifier
-            .fillMaxWidth()
+            // Full height and opaque, which matters only while this page is
+            // sliding: a page with no background of its own lets the one it is
+            // covering show straight through it. The colour is the one the root
+            // already paints, so nothing changes once it has arrived.
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
             .verticalScroll(rememberScrollState())
             .padding(contentPadding),
     ) {

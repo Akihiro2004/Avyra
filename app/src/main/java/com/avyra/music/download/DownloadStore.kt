@@ -3,6 +3,7 @@ package com.avyra.music.download
 import android.content.ContentValues
 import android.content.Context
 import android.media.MediaScannerConnection
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -88,7 +89,7 @@ object DownloadStore {
      * else — no tags to group by — so leading with the artist is the only thing
      * that puts an album back together in the listing.
      */
-    fun fileNameFor(song: Song, extension: String): String {
+    fun fileNameFor(song: Song, extension: String, distinguish: Boolean = false): String {
         val artist = sanitise(song.artist)
         val title = sanitise(song.title)
         val stem = when {
@@ -96,8 +97,54 @@ object DownloadStore {
             title.isEmpty() -> artist
             else -> "$artist - $title"
         }.ifEmpty { song.videoId }
-        return "${stem.take(MAX_STEM_CHARS).trimEnd()}.$extension"
+        val base = stem.take(MAX_STEM_CHARS).trimEnd()
+        // Only when the plain name is already taken by a *different* recording
+        // - see [Downloads.adoptable]. A name is derived from title and artist
+        // alone, so two recordings credited identically collide, and the id is
+        // the one thing that never does.
+        return if (distinguish) {
+            "$base [${sanitise(song.videoId)}].$extension"
+        } else {
+            "$base.$extension"
+        }
     }
+
+    /**
+     * How long the file at [uri] actually runs, in seconds.
+     *
+     * The only thing on hand that can tell two recordings of one song apart
+     * before one is played. Null when it cannot be read at all, which callers
+     * have to treat as "unknown", never as "matches".
+     */
+    fun durationSecondsOf(context: Context, uri: Uri): Int? = runCatching {
+        if (uri.scheme == "content") {
+            context.contentResolver.query(
+                uri,
+                arrayOf(MediaStore.MediaColumns.DURATION),
+                null,
+                null,
+                null,
+            )?.use { cursor ->
+                if (cursor.moveToFirst() && !cursor.isNull(0)) {
+                    (cursor.getLong(0) / 1000).toInt().takeIf { it > 0 }
+                } else {
+                    null
+                }
+            }
+        } else {
+            // Pre-Q downloads are plain files with no store row to ask.
+            val reader = MediaMetadataRetriever()
+            try {
+                reader.setDataSource(context, uri)
+                reader.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                    ?.toLongOrNull()
+                    ?.let { (it / 1000).toInt() }
+                    ?.takeIf { it > 0 }
+            } finally {
+                reader.release()
+            }
+        }
+    }.getOrNull()
 
     /**
      * Everything a FAT32 volume, the media store or a shell would each object

@@ -326,7 +326,9 @@ object SourceRegistry {
             .build()
             .toString()
 
-    private val BUILT_IN_KINDS = listOf(SourceKind.JIOSAAVN, SourceKind.YOUTUBE)
+    /** Seeded on a fresh install. The ranking itself is [SourceKind]'s own order. */
+    private val BUILT_IN_KINDS = listOf(SourceKind.YOUTUBE, SourceKind.JIOSAAVN)
+
 
     /** What the build-time module index is called on screen, in place of its host. */
     private const val ENV_MODULE_LABEL = "Ricky's Addon"

@@ -75,7 +75,9 @@ fun EqualizerScreen(
     val preset by AppSettings.equalizerPreset.collectAsStateWithLifecycle()
 
     LazyColumn(
-        modifier = modifier.fillMaxSize(),
+        modifier = modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background),
         contentPadding = contentPadding,
     ) {
         item(key = "title") {

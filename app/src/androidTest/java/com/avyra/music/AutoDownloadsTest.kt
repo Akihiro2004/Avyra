@@ -10,11 +10,16 @@ import androidx.media3.session.MediaBrowser
 import androidx.media3.session.SessionToken
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import android.net.Uri
+import com.avyra.music.data.sources.TrackMatcher
+import com.avyra.music.download.DownloadStore
 import com.avyra.music.download.Downloads
 import com.avyra.music.playback.PlaybackService
 import com.google.common.util.concurrent.ListenableFuture
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -74,6 +79,17 @@ class AutoDownloadsTest {
         if (::browser.isInitialized) onMain { browser.release() }
     }
 
+    /** What the media store calls the file at [uri]. */
+    private fun displayNameOf(uri: Uri): String? = runCatching {
+        context.contentResolver.query(
+            uri,
+            arrayOf(android.provider.MediaStore.MediaColumns.DISPLAY_NAME),
+            null,
+            null,
+            null,
+        )?.use { if (it.moveToFirst()) it.getString(0) else null }
+    }.getOrNull()
+
     private fun childrenOf(parentId: String): List<MediaItem> {
         val result = onMain { browser.getChildren(parentId, 0, 100, null) }.await()
         assertEquals(
@@ -114,6 +130,125 @@ class AutoDownloadsTest {
         throw AssertionError(
             "the download never landed in ${DOWNLOAD_TIMEOUT_MS / 1000}s; " +
                 "active=${Downloads.active.value}",
+        )
+    }
+
+    /**
+     * The signal the adoption guard rests on, checked against a real file.
+     *
+     * A download is adopted rather than re-fetched when Music already holds a
+     * file of the right name, and a name is only `artist - title` — so two
+     * recordings credited identically collide and the second used to adopt the
+     * first one's audio. Adoption now also requires the runtimes to agree, and
+     * this is the half of that which can only be answered by a device: whether
+     * the store can time a file this app wrote at all.
+     *
+     * It matters in both directions. If this came back null the guard would
+     * refuse every adoption — safe, but it would silently re-download whole
+     * libraries — and if it came back wrong the guard would refuse the correct
+     * file and keep the wrong one.
+     */
+    @Test
+    fun theStoreCanTimeADownloadedFileAccuratelyEnoughToIdentifyIt() {
+        val videoId = ensureOneDownload()
+        val uri = Uri.parse(
+            requireNotNull(Downloads.verifiedSavedUri(videoId)) { "nothing saved for $videoId" },
+        )
+
+        val onDisk = DownloadStore.durationSecondsOf(context, uri)
+        assertTrue(
+            "the store could not time the file, so adoption would always be refused",
+            onDisk != null && onDisk > 0,
+        )
+
+        val song = kotlinx.coroutines.runBlocking { Downloads.getDownloadedSongs(context) }
+            .first { it.videoId == videoId }
+        val claimed = TrackMatcher.secondsOf(song.durationText)
+        if (claimed != null) {
+            assertTrue(
+                "the file times at ${onDisk}s but its row says ${claimed}s; " +
+                    "the guard would refuse this track's own file",
+                kotlin.math.abs(onDisk!! - claimed) <= 3,
+            )
+        }
+    }
+
+    /**
+     * The fix itself: a file is adopted only when its runtime agrees.
+     *
+     * This is the bug in miniature. Both songs below are credited identically,
+     * so both ask for exactly the same filename, and the one already on disk is
+     * the wrong recording for the second. Adopting it is what left a row showing
+     * the right title, artist and album while playing something else — every
+     * time, because the record that adoption writes is what playback reads.
+     */
+    @Test
+    fun aFileOfTheRightNameButTheWrongLengthIsNotAdopted() {
+        val videoId = ensureOneDownload()
+        val saved = kotlinx.coroutines.runBlocking { Downloads.getDownloadedSongs(context) }
+            .first { it.videoId == videoId }
+
+        // The name the file actually has, read off the store rather than
+        // rebuilt from the row. Rebuilding it looked equivalent and is not: a
+        // download is named after the catalogue track behind the row, and the
+        // row read back afterwards carries the tags on the file, which differ
+        // in punctuation often enough to make the reconstruction miss.
+        val savedUri = requireNotNull(Downloads.verifiedSavedUri(videoId))
+        val name = requireNotNull(displayNameOf(Uri.parse(savedUri))) {
+            "the store has no name for $savedUri"
+        }
+        val onDisk = requireNotNull(
+            DownloadStore.durationSecondsOf(context, Uri.parse(savedUri)),
+        )
+        assertNotNull(
+            "the file is not findable by its own name",
+            DownloadStore.existing(context, name),
+        )
+
+        // A different recording of the same song: it would ask for exactly this
+        // filename, and it runs two minutes longer.
+        val impostor = saved.copy(
+            videoId = "a-different-id",
+            durationText = "${(onDisk + 120) / 60}:${"%02d".format((onDisk + 120) % 60)}",
+        )
+        assertNull(
+            "a file two minutes longer than the track was adopted as that track",
+            Downloads.adoptable(context, impostor, name),
+        )
+
+        // And the track's own file must still be adopted, or every re-download
+        // fetches the whole library again.
+        val itself = saved.copy(
+            durationText = "${onDisk / 60}:${"%02d".format(onDisk % 60)}",
+        )
+        assertNotNull(
+            "the track's own file was refused; adoption is now dead code",
+            Downloads.adoptable(context, itself, name),
+        )
+    }
+
+    /**
+     * The repair pass must not eat a correct download.
+     *
+     * [Downloads.auditSaved] drops any saved mapping whose file disagrees with
+     * the runtime recorded for it, which is how a track that adopted the wrong
+     * file gets un-stuck. That comparison runs over every download on the
+     * device, so a false positive here is not a slow re-fetch of one track — it
+     * is the app quietly forgetting a library that was never wrong.
+     */
+    @Test
+    fun theRepairPassLeavesACorrectDownloadAlone() {
+        val videoId = ensureOneDownload()
+        assertNotNull(
+            "nothing saved to audit",
+            Downloads.verifiedSavedUri(videoId),
+        )
+
+        kotlinx.coroutines.runBlocking { Downloads.auditSaved(context) }
+
+        assertNotNull(
+            "the repair pass forgot a download whose file is the right one",
+            Downloads.verifiedSavedUri(videoId),
         )
     }
 

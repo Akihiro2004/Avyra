@@ -87,6 +87,12 @@ class AvyraApplication : Application(), SingletonImageLoader.Factory {
                 loader.memoryCache?.clear()
                 loader.diskCache?.clear()
             }
+            // And check the downloads record against the files it names. A
+            // track that adopted a same-named file of a different recording is
+            // recorded, not merely cached, so it survives everything above and
+            // goes on playing the wrong audio until the record itself is
+            // corrected. See [Downloads.auditSaved].
+            CoroutineScope(Dispatchers.IO).launch { Downloads.auditSaved(this@AvyraApplication) }
         }
         // Initialize LastFM with saved settings if available
         initLastfm()

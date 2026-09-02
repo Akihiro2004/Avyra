@@ -16,6 +16,7 @@ import com.avyra.music.data.sources.SourceStream
 import com.avyra.music.data.sources.TrackMatcher
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Deferred
+import kotlin.math.abs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
@@ -332,6 +333,49 @@ object Downloads {
      * Named for what it asserts rather than what it does, so a caller that has
      * *not* established the file is missing has no business calling it.
      */
+    /**
+     * Drop any saved download whose file is not the track it is filed under.
+     *
+     * The repair half of the adoption fix. Requiring the runtimes to agree
+     * stops a wrong file being adopted from now on, but it says nothing about
+     * the ones already recorded — and that record is what playback reads, so a
+     * track that adopted the wrong file goes on playing it forever, through
+     * restarts and reinstalls, until something says otherwise. This is that
+     * something.
+     *
+     * Deliberately conservative. A mapping is dropped only when both runtimes
+     * are known and they disagree by more than the tolerance; anything unknown
+     * is left exactly as it is. Dropping a mapping costs a re-download, and
+     * only for the tracks that were actually wrong.
+     *
+     * Runs once per upgrade, off the main thread — see [AvyraApplication].
+     */
+    suspend fun auditSaved(context: Context) = withContext(Dispatchers.IO) {
+        val saved = _saved.value
+        if (saved.isEmpty()) return@withContext
+        val metadata = _savedMetadata.value
+
+        val wrong = saved.filter { (videoId, uriString) ->
+            val claimed = TrackMatcher.secondsOf(metadata[videoId]?.durationText)
+                ?: return@filter false
+            val onDisk = DownloadStore.durationSecondsOf(context, Uri.parse(uriString))
+                ?: return@filter false
+            abs(onDisk - claimed) > ADOPT_TOLERANCE_SEC
+        }.keys
+
+        if (wrong.isEmpty()) return@withContext
+        wrong.forEach { videoId ->
+            Log.w(
+                TAG,
+                "forgetting $videoId: the file filed under it is a different recording",
+            )
+        }
+        record(
+            saved = { it - wrong },
+            meta = { it - wrong },
+        )
+    }
+
     fun forgetMissing(videoId: String) {
         if (videoId !in _saved.value) return
         Log.d(TAG, "$videoId could not be opened; forgetting the download")
@@ -515,6 +559,54 @@ object Downloads {
      * still know it is already on the device. A stale id costs nothing: the
      * verification in [savedUri] prunes whichever one stops resolving.
      */
+    /**
+     * The file already in Music that really *is* [track], or null.
+     *
+     * A download is adopted rather than re-fetched when Music already holds a
+     * file of the right name, and that shortcut is worth keeping: it is what
+     * makes re-running a long queue take seconds. What it cannot do is decide
+     * identity on the name alone, which is all it used to do.
+     *
+     * A name is `artist - title`, and nothing else. Two recordings credited
+     * identically - a remaster, a live take, the same song on two albums, a
+     * single re-released on a compilation - produce exactly the same name. The
+     * second one downloaded adopted the first one's file and recorded its own
+     * video id against it, so the row went on showing the right title, artist
+     * and album while playing somebody else's audio. Permanently, and
+     * identically on every replay, because the record is what playback reads.
+     *
+     * So the runtime has to agree as well. It is the one property that is cheap
+     * to read off a file and that two different recordings almost never share.
+     * A track whose row carried no runtime, or a file the store cannot time, is
+     * not adopted at all: an unnecessary download costs a minute, and adopting
+     * the wrong file costs the track.
+     */
+    internal fun adoptable(context: Context, track: Song, name: String): Uri? {
+        val existing = DownloadStore.existing(context, name) ?: return null
+        val wanted = TrackMatcher.secondsOf(track.durationText)
+        if (wanted == null) {
+            Log.d(TAG, "not adopting $name: '${track.title}' was queued without a runtime")
+            return null
+        }
+        val onDisk = DownloadStore.durationSecondsOf(context, existing)
+        if (onDisk == null) {
+            Log.d(TAG, "not adopting $name: its runtime could not be read")
+            return null
+        }
+        if (abs(onDisk - wanted) > ADOPT_TOLERANCE_SEC) {
+            Log.w(
+                TAG,
+                "not adopting $name for ${track.videoId}: it runs ${onDisk}s, " +
+                    "'${track.title}' runs ${wanted}s - a different recording under the same name",
+            )
+            return null
+        }
+        return existing
+    }
+
+    /** How far a file's runtime may sit from the row's and still be it. */
+    private const val ADOPT_TOLERANCE_SEC = 3
+
     private fun remember(asked: Song, fetched: Song, uri: Uri) {
         val ids = setOf(asked.videoId, fetched.videoId)
         // Either row may be the one that knew the release: a music video is
@@ -743,7 +835,7 @@ object Downloads {
         // for lossless with a transcode.
         if (quality.keepsLossless) {
             LOSSLESS_EXTENSIONS.firstNotNullOfOrNull { extension ->
-                DownloadStore.existing(context, DownloadStore.fileNameFor(track, extension))
+                adoptable(context, track, DownloadStore.fileNameFor(track, extension))
             }?.let { uri ->
                 return@withContext Prepared(song.videoId, track, route = null, alreadyAt = uri)
             }
@@ -814,14 +906,24 @@ object Downloads {
                     lyrics = async { LyricsTag.forTrack(track) }
                 }
 
-                val name = DownloadStore.fileNameFor(track, route.extension)
-                val alreadyThere = DownloadStore.existing(context, name)
+                val preferred = DownloadStore.fileNameFor(track, route.extension)
+                val alreadyThere = adoptable(context, track, preferred)
                 if (alreadyThere != null) {
-                    Log.d(TAG, "$name is already in Music; adopting it")
+                    Log.d(TAG, "$preferred is already in Music; adopting it")
                     remember(song, track, alreadyThere)
                     DownloadSession.done(id)
                     clear(id)
                     return@coroutineScope
+                }
+
+                // A file of this name that is not this track keeps both its name
+                // and its bytes. Writing over it would trade one wrong-sounding
+                // row for two, and on pre-Q devices the write is a plain file
+                // overwrite with nothing to stop it.
+                val name = if (DownloadStore.existing(context, preferred) != null) {
+                    DownloadStore.fileNameFor(track, route.extension, distinguish = true)
+                } else {
+                    preferred
                 }
 
                 val destination = DownloadStore.begin(context, name, route.mimeType)

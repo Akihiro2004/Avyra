@@ -80,20 +80,26 @@ enum class SourceKind(
         canServeLossless = true,
     ),
 
-    JIOSAAVN(
-        label = "JioSaavn",
-        detail = "JioSaavn high-quality streams up to 320kbps AAC/MP4. A lossy fallback, tried before YouTube.",
-        labels = listOf("High Quality", "320kbps"),
-        needsServer = false,
-        canServeLossless = false,
-        worthPrefetching = true,
-    ),
-
     /**
-     * The source the app was built on, listed here so it always has a fixed
-     * place: second, behind the module source. It cannot be removed — see
-     * [SourceRegistry]. Nothing else in the app can supply a home feed, a
-     * radio station or a related-tracks queue.
+     * The source the app was built on, and the one a queued track was chosen
+     * from — so nothing below it may quietly stand in for it.
+     *
+     * The order these are declared in *is* the ranking: `SourceRegistry.active`
+     * sorts by it, and anything above YouTube is offered every YouTube track
+     * before it plays, with whatever comes back played instead. That trade is
+     * only worth making for a source the listener deliberately added, because
+     * the match behind it is title, artist and runtime and nothing else — and a
+     * cover, a re-recording or an unrelated song released under the same name
+     * agrees on all three.
+     *
+     * Measured on a real track: a hololive cover queued from YouTube was served
+     * an unrelated JioSaavn song of the same name and length, while the row went
+     * on showing the right title, artist, artwork, runtime and synced lyrics.
+     * Nothing downstream can catch that — every check available downstream is
+     * one of the three things that already agreed.
+     *
+     * It cannot be removed — see [SourceRegistry]. Nothing else in the app can
+     * supply a home feed, a radio station or a related-tracks queue.
      */
     YOUTUBE(
         label = "YouTube Music",
@@ -102,5 +108,25 @@ enum class SourceKind(
         labels = listOf("Lossy", "Full catalogue", "Radio"),
         needsServer = false,
         canServeLossless = false,
+    ),
+
+    /**
+     * Below YouTube on purpose, which is a change from how this shipped.
+     *
+     * It used to sit above, so it was offered every YouTube track and its
+     * answer was played instead — a swap nobody asked for, on a source that is
+     * enabled out of the box and lossy anyway, so the upside was 320kbps over
+     * 171 and the downside was somebody else's recording. It is still tried
+     * when YouTube has nothing to give; it just no longer stands in for a track
+     * YouTube can serve.
+     */
+    JIOSAAVN(
+        label = "JioSaavn",
+        detail = "JioSaavn high-quality streams up to 320kbps AAC/MP4. A lossy fallback, " +
+            "tried when YouTube cannot serve a track.",
+        labels = listOf("High Quality", "320kbps"),
+        needsServer = false,
+        canServeLossless = false,
+        worthPrefetching = true,
     ),
 }

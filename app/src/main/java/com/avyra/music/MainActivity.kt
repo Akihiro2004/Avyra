@@ -18,7 +18,10 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.fadeIn
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -86,6 +89,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -1388,10 +1392,49 @@ private fun AvyraApp(
                         val libraryTabKey = "$TAB_KEY$TAB_LIBRARY"
                         val libraryShowAllSwap = (initialState == "library_show_all" && targetState == libraryTabKey) ||
                             (targetState == "library_show_all" && initialState == libraryTabKey)
-                        if (tabSwap || libraryShowAllSwap) {
-                            EnterTransition.None togetherWith ExitTransition.None
-                        } else {
-                            fadeIn(tween(180)) togetherWith fadeOut(tween(180))
+                        val from = settingsDepth(initialState)
+                        val to = settingsDepth(targetState)
+                        when {
+                            tabSwap || libraryShowAllSwap ->
+                                EnterTransition.None togetherWith ExitTransition.None
+                            // Into or out of Settings: a push, not a dissolve.
+                            to != from -> {
+                                val deeper = to > from
+                                // Fully qualified: the `tween` in scope here is
+                                // this file's own Float-only convenience below.
+                                val slide = androidx.compose.animation.core.tween<IntOffset>(
+                                    durationMillis = PAGE_PUSH_MS,
+                                    easing = PagePushEasing,
+                                )
+                                val dim = androidx.compose.animation.core.tween<Float>(
+                                    durationMillis = PAGE_PUSH_MS,
+                                    easing = PagePushEasing,
+                                )
+                                val enter = if (deeper) {
+                                    // Arrives from the edge, covering what was there.
+                                    slideInHorizontally(slide) { it }
+                                } else {
+                                    // Comes back from where it was held, and lifts.
+                                    slideInHorizontally(slide) { -it / PAGE_PARALLAX } +
+                                        fadeIn(dim, initialAlpha = 0.7f)
+                                }
+                                val exit = if (deeper) {
+                                    slideOutHorizontally(slide) { -it / PAGE_PARALLAX } +
+                                        fadeOut(dim, targetAlpha = 0.7f)
+                                } else {
+                                    slideOutHorizontally(slide) { it }
+                                }
+                                // Z is the depth itself, which is what makes one
+                                // spec serve both directions: going deeper the new
+                                // page is above and slides over, coming back the
+                                // old one is still above and slides off. Without
+                                // it the returning page draws on top and the
+                                // screen appears to jump rather than uncover.
+                                (enter togetherWith exit).apply {
+                                    targetContentZIndex = to.toFloat()
+                                }
+                            }
+                            else -> fadeIn(tween(180)) togetherWith fadeOut(tween(180))
                         }
                     },
                     modifier = Modifier.hazeSource(hazeState),
@@ -2761,6 +2804,47 @@ private const val TAB_SEARCH = 3
  * prefix has to be the one thing both the writing and the reading agree on.
  */
 private const val TAB_KEY = "tab:"
+
+/**
+ * How deep in the Settings stack a page sits, and the whole basis of the push.
+ *
+ * Settings is not another tab, it is somewhere you go — and the way back out is
+ * the way you came in. A fade says neither of those things: it has no direction,
+ * so opening Settings and closing it look identical, and the pages dissolve
+ * through each other on the way. Depth gives the movement its direction, and
+ * every page below is either deeper than the last or shallower.
+ *
+ * Depth 0 is everything that is not Settings — the tabs, a pushed album, Replay.
+ * They keep the fade they always had; a card opening is a different gesture from
+ * a settings screen arriving, and only one of them is a stack.
+ */
+private fun settingsDepth(key: String): Int = when (key) {
+    "settings" -> 1
+    // Pushed from inside Settings, so one level deeper again.
+    "account_scrobbling", "equalizer", "sources", "discord" -> 2
+    else -> 0
+}
+
+/**
+ * Long enough to read as travel, short enough not to be a wait. iOS runs its
+ * push at about this, and the app is already borrowing that language.
+ */
+private const val PAGE_PUSH_MS = 320
+
+/**
+ * Material's emphasized decelerate: leaves fast, arrives slowly. Both layers
+ * share it so they stay locked together — the incoming page and the one it is
+ * covering have to move as one surface or the parallax reads as two animations
+ * that happen to overlap.
+ */
+private val PagePushEasing = CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)
+
+/**
+ * How far the page underneath travels while the new one covers it. A third,
+ * rather than the full width, is what makes it read as staying put behind the
+ * new page rather than being pushed off the screen with it.
+ */
+private const val PAGE_PARALLAX = 3
 
 /**
  * How long a finished result stays up.

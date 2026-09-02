@@ -4,6 +4,25 @@ This file records user-facing changes. Development details still live in the Git
 
 ## Unreleased
 
+## 1.0.5 - 2026-08-31
+
+### Fixed
+
+- Songs played the wrong recording. JioSaavn shipped ranked above YouTube, which meant every track you tapped was offered to it first and whatever it returned was played instead — and a match is made on title, artist and runtime alone, which a cover, a re-recording or an unrelated song of the same name all satisfy. The row went on showing the right title, artist, artwork, runtime and lyrics while the audio was somebody else's. JioSaavn is now tried only when YouTube cannot serve a track, so nothing stands in for the track you chose. Sources you add yourself are unaffected and still take priority.
+
+- A song that plays a different recording than the one on its row is now caught while it is playing, whatever caused it. The row states how long the track runs and the player knows how long what it is playing runs; two recordings of one song are almost never the same length, so when those disagree the audio is not what was asked for. The saved copy is thrown away and the track is fetched again from the top. Once per track, so a row whose own stated length is simply wrong cannot put it in a loop.
+
+### Changed
+
+- Settings now slides in from the edge and back out the way it came, instead of fading. A fade has no direction, so opening Settings and closing it looked the same; the page underneath now shifts and dims as the new one covers it, and returns as it uncovers. The screens inside Settings push the same way.
+- Closing the app from the recent apps list now stops playback. It always could, but the switch for it was off by default and easy never to find; it is on by default now and still in Settings for anyone who wants music to carry on. Playback in a car is unaffected — a swipe on the phone is ignored while anything in a car is listening, and the queue is saved before stopping so the car picks up where it left off.
+
+### Fixed
+
+- Some downloaded songs played a different recording — the right title, artist and album on the row, someone else's audio every time. A download is saved as `Artist - Title`, and a file already in Music under that name was taken to be the same track, so a remaster, a live take, or the same song from another album quietly adopted the first one's audio and recorded itself against it. A file is now only reused when its length agrees with the track's as well, and a name already taken by a different recording is left alone rather than written over.
+- A streamed track could play a different recording than the one on the row, on and off rather than every time. Audio is cached per track, and the entry it goes in was chosen from whether the settings ranked another source above YouTube — a fact about the settings, not about the track. A play that ended up on YouTube after all wrote its audio into the entry holding a substituted copy, so the next play of either got whichever had been written last.
+- Downloads already recorded against the wrong file are checked once on this update and forgotten, so the affected songs play correctly again after being downloaded a second time.
+
 ## 1.0.4 - 2026-08-31
 
 ### Added

@@ -340,6 +340,45 @@ object AudioCache {
      * The videoId behind a request. Playback asks through the custom scheme;
      * read-ahead builds the same URI, so both land on one cache entry.
      */
+    /**
+     * Which entry a YouTube-id request reads and writes.
+     *
+     * The awkward part is that this is decided *before* anything has been
+     * resolved — the cache sits outside the resolving data source, so all it
+     * has is the queue item's own URI. So the key cannot be told what was
+     * served; it has to predict it, and it is only correct while the prediction
+     * matches what the resolver goes on to do.
+     *
+     * That is where it went wrong. `#alt` was used whenever any source
+     * outranked YouTube, which is a fact about the *settings* rather than about
+     * this track — so a play that ended up on YouTube after all wrote YouTube's
+     * bytes into the entry holding a substituted copy, and the next play of
+     * either read whichever had been written last. One key, two recordings,
+     * and a wrong song that comes and goes as the entry is rewritten.
+     *
+     * The missing half is the runtime. [SourceResolver.substituteForYouTube]
+     * refuses outright for a row that carries none — a match it cannot
+     * corroborate is not worth the risk — and that refusal is knowable here,
+     * because the runtime rides in the URI as `d` exactly when the queue row
+     * had one. Predicting substitution without checking it meant every untimed
+     * row (an Android Auto shelf card, for one, which carries no duration at
+     * all) keyed to `#alt` and then played YouTube into it.
+     */
+    private fun youTubeKey(videoId: String, uri: android.net.Uri): String {
+        val rendition = QualityUpgrade.cacheTag(uri)
+        return when {
+            rendition != null -> "$videoId#$rendition"
+            // Both halves, in the order the resolver asks them.
+            SourceResolver.canSubstituteForYouTube() &&
+                uri.getQueryParameter("d") != null -> "$videoId#alt"
+            else -> videoId
+        }
+    }
+
+    /** [youTubeKey], reachable from a test. */
+    internal fun cacheKeyForTest(videoId: String, uri: android.net.Uri): String =
+        youTubeKey(videoId, uri)
+
     private val keyFactory = CacheKeyFactory { spec ->
         spec.uri.getQueryParameter("v")
             // A YouTube id can name several different recordings on disk: the
@@ -364,14 +403,7 @@ object AudioCache {
             // length mask found` at the seam, and eight-second stalls before
             // that, when the swap blocked on a cache lock the outgoing reader
             // still held.
-            ?.let { videoId ->
-                val rendition = QualityUpgrade.cacheTag(spec.uri)
-                when {
-                    rendition != null -> "$videoId#$rendition"
-                    SourceResolver.canSubstituteForYouTube() -> "$videoId#alt"
-                    else -> videoId
-                }
-            }
+            ?.let { videoId -> youTubeKey(videoId, spec.uri) }
             // A source-backed track keys on the source and its track id alone.
             // The full URI would work but carries the title and artist used
             // for cross-source matching, and the same track queued from a row

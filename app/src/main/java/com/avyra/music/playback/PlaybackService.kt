@@ -105,6 +105,16 @@ const val ACTION_TOGGLE_AUTOPLAY = "com.avyra.music.action.TOGGLE_AUTOPLAY"
 const val ACTION_TOGGLE_SHUFFLE = "com.avyra.music.action.TOGGLE_SHUFFLE"
 
 /**
+ * How far what is playing may run from the length its row claimed before it is
+ * treated as a different recording.
+ *
+ * Wide enough that nothing legitimate trips it — a listing is occasionally a
+ * second or two out, and a decoder rounds — and far narrower than the gap
+ * between two different songs.
+ */
+private const val RECORDING_DRIFT_SEC = 5
+
+/**
  * Background playback via Media3. A [MediaLibraryService] gives us the media
  * notification, lockscreen and Bluetooth controls, and — because it is the
  * library flavour rather than a plain [MediaSessionService] — the browse tree
@@ -532,6 +542,7 @@ class PlaybackService : MediaLibraryService() {
             // the last thing that happens before the process goes idle.
             if (isPlaying) prefetchAround(exoPlayer) else AudioCache.cancel()
             if (isPlaying) lookForBetterCopy(exoPlayer)
+            if (isPlaying) verifyRecording(exoPlayer)
             saveQueue()
             // Not strictly needed for the glyph — onPlayWhenReadyChanged has
             // already flipped that — but this is where hasNext/hasPrevious and
@@ -1630,6 +1641,92 @@ class PlaybackService : MediaLibraryService() {
 
     /** The background hunt for a better copy of whatever is playing. */
     private var upgradeJob: Job? = null
+
+    /**
+     * Tracks already re-fetched once for playing the wrong recording.
+     *
+     * The guard against a loop. If the fresh copy disagrees with the row too,
+     * then it is the row's own runtime that is wrong — YouTube listing one
+     * length for a video that runs another — and re-fetching it a second time
+     * would only cost the listener the track over and over.
+     */
+    private val reFetchedForMismatch = mutableSetOf<String>()
+
+    private var verifyJob: Job? = null
+
+    /**
+     * Checks that what is coming out is the recording the row asked for.
+     *
+     * The last line of defence for the wrong-song reports, and the only one
+     * that does not need to know how the wrong audio got there. Every other
+     * guard in this app is a *prediction* made before the bytes exist — is this
+     * match good enough to substitute, is this file the one it is named after,
+     * which cache entry will this end up in — and each of them can be wrong in
+     * its own way. This is not a prediction. The decoder is playing something,
+     * it knows how long that something is, and the row said how long it should
+     * be; two recordings of one song are rarely the same length, so a
+     * disagreement is evidence rather than suspicion.
+     *
+     * On a disagreement the cached bytes are thrown away — every rendition of
+     * the track, since which one is wrong cannot be known from here — and the
+     * track is played again from the top, which re-fetches it. Once only: see
+     * [reFetchedForMismatch].
+     *
+     * Does nothing at all when either length is unknown. An untimed row is
+     * exactly the case that cannot be checked, and guessing there is how the
+     * wrong recording was let through in the first place.
+     */
+    private fun verifyRecording(player: ExoPlayer) {
+        val item = player.currentMediaItem ?: return
+        val mediaId = item.mediaId
+        if (mediaId in reFetchedForMismatch) return
+        val uri = item.localConfiguration?.uri ?: return
+        val claimed = TrackMatcher.secondsOf(item.toSong().durationText) ?: return
+        if (verifyJob?.isActive == true && verifyFor == mediaId) return
+        verifyJob?.cancel()
+        verifyFor = mediaId
+
+        verifyJob = scope.launch(TrackLog.about(mediaId)) {
+            // The same settle the upgrade hunt waits for, and for the same
+            // reason: a track that has just been moved onto has not finished
+            // preparing, and its length is genuinely not known yet.
+            val actual = withTimeoutOrNull(DURATION_SETTLE_MS) {
+                while (true) {
+                    val ms = withContext(Dispatchers.Main) {
+                        this@PlaybackService.player
+                            ?.takeIf { it.currentMediaItem?.mediaId == mediaId }
+                            ?.duration
+                            ?: 0L
+                    }
+                    if (ms > 0) return@withTimeoutOrNull (ms / 1000).toInt()
+                    delay(UPGRADE_PROVE_STEP_MS)
+                }
+                @Suppress("UNREACHABLE_CODE") null
+            } ?: return@launch
+
+            if (kotlin.math.abs(actual - claimed) <= RECORDING_DRIFT_SEC) return@launch
+
+            TrackLog.w(
+                "Avyra",
+                "'${item.mediaMetadata.title}' plays for ${actual}s but its row says " +
+                    "${claimed}s - this is not the recording that was asked for; " +
+                    "dropping the cached copy and fetching it again",
+            )
+            reFetchedForMismatch += mediaId
+            withContext(Dispatchers.IO) { AudioCache.discard(uri) }
+            withContext(Dispatchers.Main) {
+                val live = this@PlaybackService.player ?: return@withContext
+                if (live.currentMediaItem?.mediaId != mediaId) return@withContext
+                // From the top: the bytes it was playing are gone, and the
+                // position it had reached was a position in the wrong song.
+                live.seekTo(live.currentMediaItemIndex, 0L)
+                live.prepare()
+                live.play()
+            }
+        }
+    }
+
+    private var verifyFor: String? = null
 
     /** Which track [upgradeJob] is hunting for — see [lookForBetterCopy]. */
     private var upgradeFor: String? = null
@@ -3511,11 +3608,51 @@ class PlaybackService : MediaLibraryService() {
      */
     override fun onTaskRemoved(rootIntent: Intent?) {
         super.onTaskRemoved(rootIntent)
-        if (AppSettings.stopOnTaskRemoved.value) {
-            // Both, or a swipe-away mid-crossfade leaves the outgoing track
-            // playing on its own out of a service that is on its way out.
-            eachPlayer { it.stop() }
-            stopSelf()
+        if (!stopOnTaskRemoved()) return
+        // Before the stop, not after. [onDestroy] saves the queue too, but by
+        // then the player has already been stopped, and the resume point is the
+        // one thing a car asks for first — both the Recent tab and the
+        // steering-wheel play button read it.
+        saveQueue()
+        // Both players, or a swipe-away mid-crossfade leaves the outgoing track
+        // playing on its own out of a service that is on its way out.
+        eachPlayer { it.stop() }
+        stopSelf()
+    }
+
+    /**
+     * Whether swiping the app away should take the music with it.
+     *
+     * The setting is only half the answer. The other half is that the phone's
+     * task and the car's session are not the same thing: a driver whose phone
+     * is in a pocket has no idea the app is in the recents list, and clearing
+     * that list — or an assistant doing it for them — would cut the music off
+     * mid-road with no way to explain why. So a swipe stops playback only when
+     * nothing in a car is listening.
+     *
+     * Checked against the session's own controllers rather than a connection
+     * flag, because those are the two questions that differ: Android Auto being
+     * *installed* is true on almost every phone, and Android Auto being
+     * *connected to this session* is the thing that means a car.
+     */
+    private fun stopOnTaskRemoved(): Boolean {
+        if (!AppSettings.stopOnTaskRemoved.value) return false
+        if (carIsListening()) {
+            TrackLog.d(
+                "Avyra",
+                "task swiped away while a car is connected; leaving playback alone",
+            )
+            return false
+        }
+        return true
+    }
+
+    /** Whether a car — projected or built in — holds a controller right now. */
+    internal fun carIsListening(): Boolean {
+        val session = mediaSession ?: return false
+        return session.connectedControllers.any { controller ->
+            session.isAutomotiveController(controller) ||
+                session.isAutoCompanionController(controller)
         }
     }
 
