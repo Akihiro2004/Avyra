@@ -138,14 +138,13 @@ object NerdStats {
     val current = MutableStateFlow<Snapshot?>(null)
 
     /**
-     * YouTube video ids with a module lookup racing YouTube's own resolve
-     * for the stream to actually play — see
-     * [PlaybackService][com.avyra.music.playback.PlaybackService]'s
-     * resolving data source. Both start together and whichever answers first
-     * plays; the module is the one still worth hearing about, because a
-     * YouTube win only means the search continues under the music — so this
-     * is what the UI shows "looking for a better copy" from. A track leaves
-     * the set the moment its own lookup settles either way, never on a timer.
+     * Tracks already handed a baseline stream while a better copy is still
+     * being sought. Initial stream resolution is deliberately not represented
+     * here: showing "Upgrading Quality" before any audio has been chosen makes
+     * ordinary startup buffering look as though the optional upgrade is
+     * blocking playback. A track enters only through [QualityUpgrade], after
+     * the fallback or below-request module has won, and leaves when that
+     * background question settles.
      */
     val racingLossless = MutableStateFlow<Set<String>>(emptySet())
 

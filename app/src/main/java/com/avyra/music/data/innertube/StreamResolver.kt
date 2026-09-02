@@ -312,9 +312,7 @@ object StreamResolver {
     suspend fun resolve(videoId: String): String {
         init
 
-        recent[videoId]
-            ?.takeIf { SystemClock.elapsedRealtime() - it.at < URL_TTL_MS }
-            ?.let { return it.url }
+        fresh(videoId)?.let { return it.url }
 
         // A verdict, not a failure: asking again cannot change the answer, so
         // every caller after the first is told so without a request being sent.
@@ -328,6 +326,23 @@ object StreamResolver {
         NerdStats.onStreamPicked(videoId, stream.kbps)
         remember(videoId, stream.url)
         return stream.url
+    }
+
+    /**
+     * Whether [resolve] can answer [videoId] without touching the network.
+     *
+     * Playback uses this only to decide whether a competing catalogue lookup
+     * needs a tiny head start delay. It deliberately exposes no URL: every
+     * caller still goes through [resolve], which keeps bitrate reporting and
+     * expiry handling in one place.
+     */
+    fun hasFreshUrl(videoId: String): Boolean = fresh(videoId) != null
+
+    private fun fresh(videoId: String): Resolved? {
+        val entry = recent[videoId] ?: return null
+        if (SystemClock.elapsedRealtime() - entry.at < URL_TTL_MS) return entry
+        recent.remove(videoId, entry)
+        return null
     }
 
     /**
@@ -437,6 +452,7 @@ object StreamResolver {
         standDownUntil.clear()
         refusalsByClient.clear()
         preferred = null
+        preferredVerifiedAt = 0L
     }
 
     private const val UNPLAYABLE_TTL_MS = 10 * 60 * 1000L
@@ -925,6 +941,29 @@ object StreamResolver {
                     continue
                 }
 
+                // A client whose URL was proved on a recent track gets one
+                // less round trip on this one. The player's opening request is
+                // the exact same two-megabyte range [probe] would ask for, and
+                // [ChunkedDataSource] feeds a refusal back into
+                // [onPlaybackRefused] before [PlaybackService] retries through
+                // another client. Probing it separately first therefore buys
+                // no new evidence in the healthy common case; it only makes the
+                // listener wait for the same bytes twice.
+                //
+                // The shortcut is deliberately temporary. Once the last full
+                // proof is old, one track pays for another probe and refreshes
+                // the trust window. A first track, a changed login session and
+                // every client reached after a refusal still take the cautious
+                // path.
+                if (canFastStart(client)) {
+                    TrackLog.d(
+                        TAG,
+                        "fast-starting $videoId via recently verified ${client.clientName}; " +
+                            "the player opening is its probe",
+                    )
+                    return Stream(playable, picked.kbps, picked.mimeType)
+                }
+
                 val verdict = timed("$videoId ${client.clientName} probe") { probe(playable) }
                 TrackLog.d(TAG, "TIMING $videoId ${client.clientName} total: ${SystemClock.elapsedRealtime() - clientStart}ms")
                 when (verdict) {
@@ -932,6 +971,7 @@ object StreamResolver {
                         TrackLog.d(TAG, "resolved $videoId via ${client.clientName} @ ${picked.kbps}kbps")
                         served(client)
                         preferred = client
+                        preferredVerifiedAt = SystemClock.elapsedRealtime()
                         return Stream(playable, picked.kbps, picked.mimeType)
                     }
                     // The client itself is being refused this track; don't
@@ -1007,6 +1047,21 @@ object StreamResolver {
 
     @Volatile
     private var preferred: PlayerClient? = null
+
+    /** When [preferred]'s URL last passed the full CDN probe. */
+    @Volatile
+    private var preferredVerifiedAt = 0L
+
+    private fun canFastStart(client: PlayerClient): Boolean =
+        preferred == client &&
+            SystemClock.elapsedRealtime() - preferredVerifiedAt <= FAST_START_TRUST_MS
+
+    /**
+     * Shorter than signed URL lifetimes and the client stand-down window. One
+     * fully probed track every few minutes is enough to notice a changed CDN
+     * policy without putting the duplicate request back on every song start.
+     */
+    private const val FAST_START_TRUST_MS = 5 * 60 * 1000L
 
     // ---- Format selection ---------------------------------------------------
 
@@ -1503,7 +1558,10 @@ object StreamResolver {
         standDownUntil[k] = SystemClock.elapsedRealtime() + STAND_DOWN_MS
         // The walk starts from whichever client last worked; a client that is
         // now being skipped everywhere must not be that one.
-        if (preferred == client) preferred = null
+        if (preferred == client) {
+            preferred = null
+            preferredVerifiedAt = 0L
+        }
     }
 
     private fun key(client: PlayerClient) = "*|${client.clientName}@${client.clientVersion}"
@@ -1549,6 +1607,7 @@ object StreamResolver {
         if (preferred == client) {
             TrackLog.w(TAG, "${client.clientName} refused a URL it had already served; standing it down")
             preferred = null
+            preferredVerifiedAt = 0L
         }
     }
 

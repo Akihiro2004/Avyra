@@ -2917,21 +2917,34 @@ class PlaybackService : MediaLibraryService() {
         if (StreamChoice.substitutesRefused(videoId)) {
             return Resolved.YouTube(StreamResolver.resolve(videoId))
         }
-        NerdStats.onLosslessRaceStart(videoId)
+        val raceStartedAt = SystemClock.elapsedRealtime()
         // Both legs are parented to the service's scope rather than to the
         // caller, so neither inherits whose track this is — see
         // [TrackLog.about]. Without it the module walk and the client walk both
         // log from a scope that knows nothing, which is most of what a resolve
         // has to say about itself.
-        val lookup = scope.async(Dispatchers.IO + TrackLog.about(videoId)) {
-            withTimeoutOrNull(SUBSTITUTE_TIMEOUT_MS) { SourceResolver.substituteForYouTube(target) }
-        }
         // Started now rather than after the modules have had their say, and
         // wrapped rather than thrown from: it is awaited only on the paths
         // that need it, and an async that fails without ever being awaited is
         // an unhandled exception in this service's scope.
+        // Ask before launching [fallback]. A cached resolve can finish quickly
+        // enough to populate this map before the next line otherwise, making a
+        // genuinely cold selection look warm and defeating the head start.
+        val fallbackWasWarm = StreamResolver.hasFreshUrl(videoId)
         val fallback = scope.async(Dispatchers.IO + TrackLog.about(videoId)) {
             runCatching { StreamResolver.resolve(videoId) }
+        }
+        val lookup = scope.async(Dispatchers.IO + TrackLog.about(videoId)) {
+            // On a cold selection the baseline stream gets the radio and
+            // connection pool first. Catalogue requests are small, but they fan
+            // out across every enabled source and used to begin on the same
+            // scheduler tick as YouTube's visitor/player/CDN walk. A short
+            // hedge is enough for a healthy fallback to get through that burst;
+            // a genuinely faster module still wins, and a warm URL pays no
+            // delay at all. If YouTube fails, this lookup is already running by
+            // the time that verdict arrives.
+            if (!fallbackWasWarm) delay(FALLBACK_HEAD_START_MS)
+            withTimeoutOrNull(SUBSTITUTE_TIMEOUT_MS) { SourceResolver.substituteForYouTube(target) }
         }
 
         // First past the post. A null because [lookup] won is a module miss; a
@@ -2963,7 +2976,12 @@ class PlaybackService : MediaLibraryService() {
             // Everything that was asked for, ahead of the fallback: the
             // ordinary good case, and the one with no seam in it.
             if (!quick.belowRequest) {
-                NerdStats.onLosslessRaceEnd(videoId)
+                TrackLog.d(
+                    "Avyra",
+                    "TIMING startup chose ${quick.format.summary} in " +
+                        "${SystemClock.elapsedRealtime() - raceStartedAt}ms",
+                    about = videoId,
+                )
                 return Resolved.Module(quick)
             }
             // Less than was asked for — but a lossy copy from a module still
@@ -2974,7 +2992,13 @@ class PlaybackService : MediaLibraryService() {
                 target = target,
                 playing = quick.format,
             )
-            if (!settled) NerdStats.onLosslessRaceEnd(videoId)
+            TrackLog.d(
+                "Avyra",
+                "TIMING startup chose ${quick.format.summary} in " +
+                    "${SystemClock.elapsedRealtime() - raceStartedAt}ms" +
+                    if (settled) "; upgrading in background" else "",
+                about = videoId,
+            )
             return Resolved.Module(quick)
         }
 
@@ -2991,7 +3015,12 @@ class PlaybackService : MediaLibraryService() {
             inFlight = lookup.takeIf { lookup.isActive },
             playing = NerdStats.pickedBitrateKbps(videoId)?.let { StreamFormat(kbps = it) },
         )
-        if (!pending) NerdStats.onLosslessRaceEnd(videoId)
+        TrackLog.d(
+            "Avyra",
+            "TIMING startup chose YouTube in ${SystemClock.elapsedRealtime() - raceStartedAt}ms" +
+                if (pending) "; upgrading in background" else "",
+            about = videoId,
+        )
         return Resolved.YouTube(url)
     }
 
@@ -3907,6 +3936,14 @@ class PlaybackService : MediaLibraryService() {
          * enough that a dead server costs a pause rather than a stall.
          */
         const val SUBSTITUTE_TIMEOUT_MS = 20_000L
+
+        /**
+         * Lets a cold baseline resolve leave the starting blocks before the
+         * optional quality search fans out. Small enough that a fast source can
+         * still win without a perceptible penalty; large enough to keep both
+         * request bursts off the same radio scheduling window.
+         */
+        const val FALLBACK_HEAD_START_MS = 250L
 
         /**
          * How much of a track has to be left for a mid-track quality swap to
