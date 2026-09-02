@@ -3049,7 +3049,7 @@ private fun TransportGlyph(
     Box(
         modifier = Modifier
             .size(size + 12.dp)
-            .clip(if (primary) RoundedCornerShape(24.dp) else CircleShape)
+            .clip(CircleShape)
             .background(
                 if (primary) MaterialTheme.colorScheme.primary else Color.Transparent,
             )
