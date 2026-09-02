@@ -427,6 +427,7 @@ private fun AvyraApp(
     }
     val query by viewModel.query.collectAsStateWithLifecycle()
     val results by viewModel.results.collectAsStateWithLifecycle()
+    val searchLoadingMore by viewModel.searchLoadingMore.collectAsStateWithLifecycle()
     val exploreState by viewModel.explore.collectAsStateWithLifecycle()
     val libraryState by viewModel.library.collectAsStateWithLifecycle()
     val filter by viewModel.filter.collectAsStateWithLifecycle()
@@ -1780,6 +1781,8 @@ private fun AvyraApp(
                             filter = filter,
                             onFilterChange = viewModel::onFilterChange,
                             results = results,
+                            loadingMore = searchLoadingMore,
+                            onLoadMore = viewModel::loadMoreSearchResults,
                             listState = searchListState,
                             focusTrigger = searchFocusTrigger,
                             // Search hits are alternatives to each other, not a running

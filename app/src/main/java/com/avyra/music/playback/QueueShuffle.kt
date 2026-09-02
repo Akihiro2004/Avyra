@@ -2,6 +2,7 @@ package com.avyra.music.playback
 
 import androidx.media3.common.Player
 import com.avyra.music.data.model.Song
+import com.avyra.music.data.settings.AppSettings
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -31,11 +32,18 @@ object QueueShuffle {
     /** Whether the queue is currently held in shuffled order. */
     val enabled: StateFlow<Boolean> = _enabled.asStateFlow()
 
+    /** Restores the persisted flag before a queue exists to rearrange. */
+    fun setEnabled(enabled: Boolean) {
+        original = emptyList()
+        _enabled.value = enabled
+    }
+
     /** Media ids in their pre-shuffle order. Empty while shuffle is off. */
     private var original: List<String> = emptyList()
 
     fun toggle(player: Player) {
         if (_enabled.value) restore(player) else shuffle(player)
+        AppSettings.setShuffleEnabled(_enabled.value)
     }
 
     /**
@@ -46,6 +54,7 @@ object QueueShuffle {
     fun enableForNextQueue() {
         original = emptyList()
         _enabled.value = true
+        AppSettings.setShuffleEnabled(true)
     }
 
     /**

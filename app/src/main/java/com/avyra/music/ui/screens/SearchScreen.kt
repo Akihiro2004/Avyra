@@ -41,6 +41,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -79,6 +80,8 @@ fun SearchScreen(
     filter: SearchFilter,
     onFilterChange: (SearchFilter) -> Unit,
     results: UiState<List<SearchResult>>?,
+    loadingMore: Boolean,
+    onLoadMore: () -> Unit,
     listState: LazyListState,
     focusTrigger: Int = 0,
     onSongClick: (List<Song>, Int) -> Unit,
@@ -113,6 +116,15 @@ fun SearchScreen(
     // up: the results are for whatever was searched before this edit began,
     // and so are the filter tabs above them.
     val suggesting = suggestions.isNotEmpty()
+    LaunchedEffect(listState, results, loadingMore) {
+        if (results !is UiState.Success) return@LaunchedEffect
+        snapshotFlow {
+            val layout = listState.layoutInfo
+            (layout.visibleItemsInfo.lastOrNull()?.index ?: -1) to layout.totalItemsCount
+        }.collect { (lastVisible, total) ->
+            if (!loadingMore && total > 0 && lastVisible >= total - 4) onLoadMore()
+        }
+    }
     Column(modifier = modifier.fillMaxSize()) {
         // Search field and filter tabs stay fixed at the top, outside the
         // scrolling list, so they're always reachable rather than scrolling
@@ -184,6 +196,13 @@ fun SearchScreen(
                                 color = MaterialTheme.colorScheme.outline,
                             )
                         }
+                    }
+                    if (loadingMore) {
+                        songListSkeleton(
+                            count = 3,
+                            keyPrefix = "skeleton:search:more",
+                            circular = filter == SearchFilter.ARTISTS,
+                        )
                     }
                 }
             }

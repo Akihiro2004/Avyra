@@ -1058,6 +1058,10 @@ object Downloads {
             Log.d(TAG, "nothing to file a '${stream.format.codec}' as; taking YouTube for ${track.videoId}")
             return null
         }
+        if (!Downloader.isDirectAudioFile(stream.url, stream.headers, stream.format)) {
+            Log.d(TAG, "source returned a manifest or mismatched container; taking YouTube for ${track.videoId}")
+            return null
+        }
         return stream to storable
     }
 

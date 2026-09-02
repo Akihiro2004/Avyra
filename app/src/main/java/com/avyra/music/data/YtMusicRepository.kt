@@ -152,10 +152,31 @@ object YtMusicRepository {
         }
     }
 
-    suspend fun search(query: String, filter: SearchFilter): Result<List<SearchResult>> =
+    data class SearchPage(val rows: List<SearchResult>, val continuation: String?)
+
+    suspend fun searchPage(query: String, filter: SearchFilter): Result<SearchPage> =
         call("search:${filter.name}") {
-            InnertubeParser.parseSearch(Innertube.search(query, filter.params))
+            InnertubeParser.parseSearchPage(
+                Innertube.search(query, filter.params),
+                includeVideos = filter == SearchFilter.VIDEOS,
+            ).let { SearchPage(it.rows.distinctBy { row -> row.identityKey() }, it.continuation) }
         }
+
+    suspend fun searchContinuation(token: String, filter: SearchFilter): Result<SearchPage> =
+        call("search:continuation") {
+            InnertubeParser.parseSearchPage(
+                Innertube.searchContinuation(token),
+                includeVideos = filter == SearchFilter.VIDEOS,
+            ).let { SearchPage(it.rows.distinctBy { row -> row.identityKey() }, it.continuation) }
+        }
+
+    suspend fun search(query: String, filter: SearchFilter): Result<List<SearchResult>> =
+        searchPage(query, filter).map { it.rows }
+
+    private fun SearchResult.identityKey(): String = when (this) {
+        is SearchResult.Track -> "v:${song.videoId}"
+        is SearchResult.Browse -> "b:${item.browseId}"
+    }
 
     /**
      * What YouTube Music would suggest completing [input] to, for the search
@@ -232,7 +253,7 @@ object YtMusicRepository {
                 .map { (title, browseId) ->
                     async {
                         val items = runCatching {
-                            InnertubeParser.parseLibraryItems(Innertube.browse(browseId))
+                            libraryItemsPaged(browseId)
                         }.getOrDefault(emptyList())
                         HomeShelf(title, items)
                     }
@@ -414,6 +435,23 @@ object YtMusicRepository {
         return out.values.toList()
     }
 
+    private suspend fun libraryItemsPaged(browseId: String): List<ShelfItem> {
+        val out = LinkedHashMap<String, ShelfItem>()
+        var response = Innertube.browse(browseId)
+        var page = 1
+        while (true) {
+            val parsed = InnertubeParser.parseLibraryItemPage(response)
+            parsed.items.forEach { item ->
+                val key = item.browseId ?: item.videoId ?: "${item.title}\n${item.subtitle}"
+                out.putIfAbsent(key, item)
+            }
+            val token = parsed.continuation ?: break
+            if (page++ >= MAX_PAGES) break
+            response = runCatching { Innertube.browseContinuation(token) }.getOrNull() ?: break
+        }
+        return out.values.toList()
+    }
+
     const val MAX_PAGES = 10
 
     /**
@@ -480,12 +518,10 @@ object YtMusicRepository {
         call("library:$playlistId") { Innertube.ratePlaylist(playlistId, saved) }
 
     /**
-     * The playlists a track can be added to. Not paged: an account with more
-     * than one page of playlists is rare, and the picker is a list to scroll
-     * rather than a feed to follow.
+     * The playlists a track can be added to, including later library pages.
      */
     suspend fun userPlaylists(): Result<List<UserPlaylist>> = call("playlists") {
-        InnertubeParser.parseUserPlaylists(Innertube.browse(LIBRARY_PLAYLISTS))
+        InnertubeParser.parseUserPlaylists(libraryItemsPaged(LIBRARY_PLAYLISTS))
     }
 
     /** Creates a playlist, optionally seeded with [videoIds]; returns its id. */

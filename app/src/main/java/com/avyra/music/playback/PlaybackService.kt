@@ -12,6 +12,7 @@ import androidx.media3.common.C
 import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.Format
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.Timeline
@@ -704,6 +705,7 @@ class PlaybackService : MediaLibraryService() {
         override fun onRepeatModeChanged(repeatMode: Int) {
             val previous = lastRepeatMode
             lastRepeatMode = repeatMode
+            AppSettings.setRepeatMode(repeatMode)
             // Repeat-all loops the queue as it stands; AutoPlay's tracks are the
             // opposite of that — an endless supply of new ones — so they come
             // back out first, and native REPEAT_MODE_ALL then wraps a plain
@@ -2469,7 +2471,10 @@ class PlaybackService : MediaLibraryService() {
             swapCutAt = SystemClock.elapsedRealtime()
             player.replaceMediaItem(
                 player.currentMediaItemIndex,
-                now.item.buildUpon().setUri(upgradedUri).build(),
+                now.item.buildUpon()
+                    .setUri(upgradedUri)
+                    .withResolvedStreamType(stream.url)
+                    .build(),
             )
             player.seekTo(player.currentMediaItemIndex, now.position)
             player.prepare()
@@ -2586,7 +2591,12 @@ class PlaybackService : MediaLibraryService() {
         }
         val audition = withContext(Dispatchers.Main) {
             buildAuditionPlayer().apply {
-                setMediaItem(at.item.buildUpon().setUri(upgradedUri).build())
+                setMediaItem(
+                    at.item.buildUpon()
+                        .setUri(upgradedUri)
+                        .withResolvedStreamType(stream.url)
+                        .build(),
+                )
                 seekTo(at.position)
                 prepare()
             }
@@ -2710,6 +2720,18 @@ class PlaybackService : MediaLibraryService() {
         }
         return Audition.Waiting
     }
+
+    /**
+     * Tells Media3 when a resolved replacement is an HLS manifest. Avyra's
+     * virtual playback URI has no `.m3u8` suffix, so type inference otherwise
+     * selects a progressive source before the resolver reveals the real URL.
+     */
+    private fun MediaItem.Builder.withResolvedStreamType(streamUrl: String): MediaItem.Builder =
+        if (streamUrl.substringBefore('?').endsWith(".m3u8", ignoreCase = true)) {
+            setMimeType(MimeTypes.APPLICATION_M3U8)
+        } else {
+            this
+        }
 
     /**
      * The throwaway player an upgrade is proved on.
@@ -3266,6 +3288,8 @@ class PlaybackService : MediaLibraryService() {
     private fun applySettings(player: ExoPlayer) {
         player.skipSilenceEnabled = AppSettings.skipSilence.value
         player.setPlaybackSpeed(AppSettings.playbackSpeed.value)
+        QueueShuffle.setEnabled(AppSettings.shuffleEnabled.value)
+        player.repeatMode = AppSettings.repeatMode.value
     }
 
     /** Runs [body] against both players, in whichever roles they currently hold. */
@@ -3337,6 +3361,7 @@ class PlaybackService : MediaLibraryService() {
                 AppSettings.scrobbleMinDuration,
                 AppSettings.scrobbleDelayPercent,
                 AppSettings.scrobbleDelaySeconds,
+                AppSettings.lastfmPrimaryArtistOnly,
             ) { values ->
                 ScrobblingSnapshot(
                     lastfmEnabled = values[0] as Boolean,
@@ -3349,6 +3374,7 @@ class PlaybackService : MediaLibraryService() {
                     minDuration = values[7] as Int,
                     delayPercent = values[8] as Float,
                     delaySeconds = values[9] as Int,
+                    primaryArtistOnly = values[10] as Boolean,
                 )
             }.collectLatest { snapshot ->
                 val shouldEnable = AppSettings.scrobblingAvailable &&
@@ -3377,6 +3403,7 @@ class PlaybackService : MediaLibraryService() {
                 manager.scrobbleDelayPercent = snapshot.delayPercent
                 manager.scrobbleDelaySeconds = snapshot.delaySeconds
                 manager.useNowPlaying = snapshot.nowPlaying
+                manager.usePrimaryArtistOnly = snapshot.primaryArtistOnly
 
                 player?.let { exoPlayer ->
                     if (exoPlayer.isPlaying) {
@@ -3402,6 +3429,7 @@ class PlaybackService : MediaLibraryService() {
         val minDuration: Int,
         val delayPercent: Float,
         val delaySeconds: Int,
+        val primaryArtistOnly: Boolean,
     )
 
     // ---- Discord Rich Presence -------------------------------------------------
@@ -3580,7 +3608,14 @@ class PlaybackService : MediaLibraryService() {
         if (!lbEnabled || lbToken.isBlank()) return
         val endMs = System.currentTimeMillis()
         scope.launch {
-            ListenBrainzManager.submitFinished(lbToken, song, startMs, endMs, durationMs)
+            ListenBrainzManager.submitFinished(
+                lbToken,
+                song,
+                startMs,
+                endMs,
+                durationMs,
+                AppSettings.listenBrainzPrimaryArtistOnly.value,
+            )
         }
     }
 
@@ -3590,7 +3625,13 @@ class PlaybackService : MediaLibraryService() {
         val lbToken = AppSettings.listenBrainzToken.value
         if (!lbEnabled || lbToken.isBlank()) return
         scope.launch {
-            ListenBrainzManager.submitPlayingNow(lbToken, song, positionMs, durationMs)
+            ListenBrainzManager.submitPlayingNow(
+                lbToken,
+                song,
+                positionMs,
+                durationMs,
+                AppSettings.listenBrainzPrimaryArtistOnly.value,
+            )
         }
     }
 
@@ -3688,7 +3729,12 @@ class PlaybackService : MediaLibraryService() {
                 val lastDuration = player?.duration?.takeIf { it > 0 }
                 CoroutineScope(Dispatchers.IO).launch {
                     ListenBrainzManager.submitFinished(
-                        lbToken, lastSong, lastStart, System.currentTimeMillis(), lastDuration,
+                        lbToken,
+                        lastSong,
+                        lastStart,
+                        System.currentTimeMillis(),
+                        lastDuration,
+                        AppSettings.listenBrainzPrimaryArtistOnly.value,
                     )
                 }
             }

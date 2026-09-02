@@ -49,11 +49,13 @@ fun AccountAndScrobblingScreen(
     val lastfmSessionKey by AppSettings.lastfmSessionKey.collectAsStateWithLifecycle()
     val lastfmScrobbleEnabled by AppSettings.lastfmScrobbleEnabled.collectAsStateWithLifecycle()
     val lastfmNowPlayingEnabled by AppSettings.lastfmNowPlaying.collectAsStateWithLifecycle()
+    val lastfmPrimaryArtistOnly by AppSettings.lastfmPrimaryArtistOnly.collectAsStateWithLifecycle()
     val scrobbleMinDuration by AppSettings.scrobbleMinDuration.collectAsStateWithLifecycle()
     val scrobbleDelayPercent by AppSettings.scrobbleDelayPercent.collectAsStateWithLifecycle()
     val scrobbleDelaySeconds by AppSettings.scrobbleDelaySeconds.collectAsStateWithLifecycle()
     val listenBrainzEnabled by AppSettings.listenBrainzEnabled.collectAsStateWithLifecycle()
     val listenBrainzToken by AppSettings.listenBrainzToken.collectAsStateWithLifecycle()
+    val listenBrainzPrimaryArtistOnly by AppSettings.listenBrainzPrimaryArtistOnly.collectAsStateWithLifecycle()
     val discordToken by AppSettings.discordToken.collectAsStateWithLifecycle()
     val discordUsername by AppSettings.discordUsername.collectAsStateWithLifecycle()
     val discordRpcEnabled by AppSettings.discordRpcEnabled.collectAsStateWithLifecycle()
@@ -126,6 +128,24 @@ fun AccountAndScrobblingScreen(
                     },
                     onClick = onOpenListenBrainzLogin,
                 )
+                if (listenBrainzEnabled && listenBrainzToken.isNotBlank()) {
+                    RowDivider()
+                    SettingsRow(
+                        icon = Icons.Rounded.GraphicEq,
+                        title = "Use primary artist only",
+                        subtitle = "Send only the first credited artist to ListenBrainz",
+                        trailing = {
+                            Switch(
+                                checked = listenBrainzPrimaryArtistOnly,
+                                onCheckedChange = AppSettings::setListenBrainzPrimaryArtistOnly,
+                                colors = avyraSwitchColors(),
+                            )
+                        },
+                        onClick = {
+                            AppSettings.setListenBrainzPrimaryArtistOnly(!listenBrainzPrimaryArtistOnly)
+                        },
+                    )
+                }
                 RowDivider()
                 SettingsRow(
                     icon = Icons.Rounded.History,
@@ -170,6 +190,22 @@ fun AccountAndScrobblingScreen(
                             )
                         },
                         onClick = { AppSettings.setLastfmScrobbleEnabled(!lastfmScrobbleEnabled) },
+                    )
+                    RowDivider()
+                    SettingsRow(
+                        icon = Icons.Rounded.GraphicEq,
+                        title = "Use primary artist only",
+                        subtitle = "Send only the first credited artist to Last.fm",
+                        trailing = {
+                            Switch(
+                                checked = lastfmPrimaryArtistOnly,
+                                onCheckedChange = AppSettings::setLastfmPrimaryArtistOnly,
+                                colors = avyraSwitchColors(),
+                            )
+                        },
+                        onClick = {
+                            AppSettings.setLastfmPrimaryArtistOnly(!lastfmPrimaryArtistOnly)
+                        },
                     )
                     RowDivider()
                     SettingsRow(

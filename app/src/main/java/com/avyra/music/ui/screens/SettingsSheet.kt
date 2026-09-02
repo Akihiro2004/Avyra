@@ -32,6 +32,7 @@ import androidx.compose.material.icons.rounded.Animation
 import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.BlurOff
+import androidx.compose.material.icons.rounded.BlurOn
 import androidx.compose.material.icons.rounded.Brightness4
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ChevronRight
@@ -41,6 +42,7 @@ import androidx.compose.material.icons.rounded.Dns
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.FileDownload
 import androidx.compose.material.icons.rounded.FileUpload
+import androidx.compose.material.icons.rounded.FilterAlt
 import androidx.compose.material.icons.rounded.Fullscreen
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.History
@@ -166,6 +168,7 @@ fun SettingsScreen(
     val nerdStats by AppSettings.showNerdStats.collectAsStateWithLifecycle()
     val reduceAnimation by AppSettings.reduceAnimation.collectAsStateWithLifecycle()
     val reduceDynamicBlur by AppSettings.reduceDynamicBlur.collectAsStateWithLifecycle()
+    val lyricsBlur by AppSettings.lyricsBlur.collectAsStateWithLifecycle()
     val animatedCanvas by AppSettings.animatedCanvas.collectAsStateWithLifecycle()
     val canvasOverCellular by AppSettings.canvasOverCellular.collectAsStateWithLifecycle()
     val fullBleedArtwork by AppSettings.fullBleedArtwork.collectAsStateWithLifecycle()
@@ -182,6 +185,7 @@ fun SettingsScreen(
     val swipeToPlayNext by AppSettings.swipeToPlayNext.collectAsStateWithLifecycle()
     val dontRepeatSuggestions by AppSettings.dontRepeatSuggestions.collectAsStateWithLifecycle()
     val convertVideoToAudio by AppSettings.convertVideoToAudio.collectAsStateWithLifecycle()
+    val filterNonMusicAudio by AppSettings.filterNonMusicAudio.collectAsStateWithLifecycle()
 
     // Scrobbling states
     val lastfmEnabled by AppSettings.lastfmEnabled.collectAsStateWithLifecycle()
@@ -577,6 +581,21 @@ fun SettingsScreen(
             if (syncedLyrics) {
                 RowDivider()
                 SettingsRow(
+                    icon = Icons.Rounded.BlurOn,
+                    tint = SettingsTint.Purple,
+                    title = "Blur unfocused lyrics",
+                    subtitle = "Keep the line being sung sharp",
+                    trailing = {
+                        Switch(
+                            checked = lyricsBlur,
+                            onCheckedChange = AppSettings::setLyricsBlur,
+                            colors = avyraSwitchColors(),
+                        )
+                    },
+                    onClick = { AppSettings.setLyricsBlur(!lyricsBlur) },
+                )
+                RowDivider()
+                SettingsRow(
                     icon = Icons.Rounded.Language,
                     tint = SettingsTint.Blue,
                     title = stringResource(R.string.lyrics_sources),
@@ -591,6 +610,23 @@ fun SettingsScreen(
         }
 
         val cacheLimitMb = (cacheLimitBytes / (1024 * 1024)).toInt()
+        SettingsGroup(header = "Local music") {
+            SettingsRow(
+                icon = Icons.Rounded.FilterAlt,
+                tint = SettingsTint.Teal,
+                title = "Filter non-music audio",
+                subtitle = "Hide short clips, ringtones, recordings and voice notes",
+                trailing = {
+                    Switch(
+                        checked = filterNonMusicAudio,
+                        onCheckedChange = AppSettings::setFilterNonMusicAudio,
+                        colors = avyraSwitchColors(),
+                    )
+                },
+                onClick = { AppSettings.setFilterNonMusicAudio(!filterNonMusicAudio) },
+            )
+        }
+
         SettingsGroup(header = stringResource(R.string.storage)) {
             SliderRow(
                 icon = Icons.Rounded.Storage,

@@ -37,6 +37,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
@@ -58,6 +59,10 @@ import com.avyra.music.ui.icons.AvyraIcons
 import com.avyra.music.ui.player.MeshGradientBackground
 import com.avyra.music.ui.player.rememberArtworkColors
 import com.avyra.music.ui.theme.AccentRed
+
+@Composable
+private fun replayInk(): Color =
+    if (MaterialTheme.colorScheme.background.luminance() < 0.5f) Color.White else Color.Black
 
 /**
  * The Replay page: four cards, four charts and a way to share the lot.
@@ -125,10 +130,14 @@ fun ReplayScreen(
                 .fillMaxSize()
                 .background(
                     Brush.verticalGradient(
-                        listOf(
+                        if (replayInk() == Color.White) listOf(
                             Color.Black.copy(alpha = 0.30f),
                             Color.Black.copy(alpha = 0.72f),
                             Color.Black.copy(alpha = 0.88f),
+                        ) else listOf(
+                            Color.White.copy(alpha = 0.25f),
+                            Color.White.copy(alpha = 0.65f),
+                            Color.White.copy(alpha = 0.82f),
                         ),
                     ),
                 ),
@@ -144,7 +153,7 @@ fun ReplayScreen(
             when {
                 state.loading && summary == null -> item("loading") {
                     Box(Modifier.fillMaxWidth().padding(64.dp), Alignment.Center) {
-                        CircularProgressIndicator(color = Color.White.copy(alpha = 0.6f))
+                        CircularProgressIndicator(color = replayInk().copy(alpha = 0.6f))
                     }
                 }
                 summary == null || summary.isEmpty -> item("empty") { EmptyReplay(state.period) }
@@ -237,12 +246,12 @@ private fun Heading(state: ReplayState, onPeriodChange: (ReplayPeriod) -> Unit) 
             text = "Replay",
             style = MaterialTheme.typography.displayLarge,
             fontWeight = FontWeight.W800,
-            color = Color.White,
+            color = replayInk(),
         )
         Text(
             text = state.summary?.label ?: state.period.chip,
             style = MaterialTheme.typography.titleMedium,
-            color = Color.White.copy(alpha = 0.6f),
+            color = replayInk().copy(alpha = 0.6f),
         )
         Spacer(Modifier.height(14.dp))
         PeriodPicker(state.period, onPeriodChange)
@@ -263,14 +272,14 @@ private fun PeriodPicker(selected: ReplayPeriod, onSelect: (ReplayPeriod) -> Uni
     Row(
         Modifier
             .clip(RoundedCornerShape(12.dp))
-            .background(Color.White.copy(alpha = 0.10f))
+            .background(replayInk().copy(alpha = 0.10f))
             .padding(3.dp),
         horizontalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         ReplayPeriod.entries.forEach { period ->
             val active = period == selected
             val background by animateColorAsState(
-                if (active) Color.White.copy(alpha = 0.92f) else Color.Transparent,
+                if (active) replayInk().copy(alpha = 0.92f) else Color.Transparent,
                 tween(160),
                 label = "periodChip",
             )
@@ -278,7 +287,11 @@ private fun PeriodPicker(selected: ReplayPeriod, onSelect: (ReplayPeriod) -> Uni
                 text = period.chip,
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.W700,
-                color = if (active) Color.Black else Color.White.copy(alpha = 0.75f),
+                color = if (active) {
+                    if (replayInk() == Color.White) Color.Black else Color.White
+                } else {
+                    replayInk().copy(alpha = 0.75f)
+                },
                 modifier = Modifier
                     .clip(RoundedCornerShape(10.dp))
                     .background(background)
@@ -341,7 +354,7 @@ private fun ReplayActionRow(icon: ImageVector, label: String, onClick: () -> Uni
             .padding(horizontal = PAGE_GUTTER + 10.dp, vertical = 18.dp)
             .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
-            .background(Color.White.copy(alpha = 0.12f))
+            .background(replayInk().copy(alpha = 0.12f))
             .clickable(onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -349,20 +362,20 @@ private fun ReplayActionRow(icon: ImageVector, label: String, onClick: () -> Uni
         Icon(
             imageVector = icon,
             contentDescription = null,
-            tint = Color.White,
+            tint = replayInk(),
             modifier = Modifier.size(18.dp),
         )
         Spacer(Modifier.width(12.dp))
         Text(
             text = label,
             style = MaterialTheme.typography.titleMedium,
-            color = Color.White,
+            color = replayInk(),
             modifier = Modifier.weight(1f),
         )
         Icon(
             imageVector = AvyraIcons.ChevronRight,
             contentDescription = null,
-            tint = Color.White.copy(alpha = 0.5f),
+            tint = replayInk().copy(alpha = 0.5f),
             modifier = Modifier.size(16.dp),
         )
     }
@@ -391,7 +404,7 @@ private fun SectionTitle(text: String) {
         text = text,
         style = MaterialTheme.typography.headlineMedium,
         fontWeight = FontWeight.W800,
-        color = Color.White,
+        color = replayInk(),
         modifier = Modifier.padding(
             start = PAGE_GUTTER + 10.dp,
             end = PAGE_GUTTER + 10.dp,
@@ -428,7 +441,7 @@ private fun ReplayChartRow(row: ReplayRow, circular: Boolean, onClick: () -> Uni
                 text = row.title,
                 style = MaterialTheme.typography.bodyLarge,
                 fontWeight = FontWeight.W600,
-                color = Color.White,
+                color = replayInk(),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -436,7 +449,7 @@ private fun ReplayChartRow(row: ReplayRow, circular: Boolean, onClick: () -> Uni
                 text = listOfNotNull(row.subtitle, formatListening(row.ms))
                     .joinToString(" · "),
                 style = MaterialTheme.typography.bodyMedium,
-                color = Color.White.copy(alpha = 0.55f),
+                color = replayInk().copy(alpha = 0.55f),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -445,7 +458,7 @@ private fun ReplayChartRow(row: ReplayRow, circular: Boolean, onClick: () -> Uni
             Text(
                 text = row.plays.toString(),
                 style = MaterialTheme.typography.labelMedium,
-                color = Color.White.copy(alpha = 0.45f),
+                color = replayInk().copy(alpha = 0.45f),
             )
         }
     }
@@ -483,7 +496,7 @@ private fun SectionTitleInline(text: String) {
         text = text,
         style = MaterialTheme.typography.headlineMedium,
         fontWeight = FontWeight.W800,
-        color = Color.White,
+        color = replayInk(),
         modifier = Modifier.padding(top = 8.dp, bottom = 10.dp),
     )
 }
@@ -493,7 +506,7 @@ private fun StatTile(label: String, value: String, modifier: Modifier = Modifier
     Column(
         modifier
             .clip(RoundedCornerShape(14.dp))
-            .background(Color.White.copy(alpha = 0.09f))
+            .background(replayInk().copy(alpha = 0.09f))
             .padding(vertical = 14.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -501,12 +514,12 @@ private fun StatTile(label: String, value: String, modifier: Modifier = Modifier
             text = value,
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.W800,
-            color = Color.White,
+            color = replayInk(),
         )
         Text(
             text = label,
             style = MaterialTheme.typography.labelSmall,
-            color = Color.White.copy(alpha = 0.55f),
+            color = replayInk().copy(alpha = 0.55f),
             letterSpacing = 1.sp,
         )
     }
@@ -517,7 +530,7 @@ private fun Note(text: String, modifier: Modifier = Modifier) {
     Text(
         text = text,
         style = MaterialTheme.typography.bodyMedium,
-        color = Color.White.copy(alpha = 0.6f),
+        color = replayInk().copy(alpha = 0.6f),
         modifier = modifier,
     )
 }
@@ -531,14 +544,14 @@ private fun EmptyReplay(period: ReplayPeriod) {
         Icon(
             imageVector = AvyraIcons.Clock,
             contentDescription = null,
-            tint = Color.White.copy(alpha = 0.4f),
+            tint = replayInk().copy(alpha = 0.4f),
             modifier = Modifier.size(44.dp),
         )
         Spacer(Modifier.height(16.dp))
         Text(
             text = "Not enough listening yet",
             style = MaterialTheme.typography.titleLarge,
-            color = Color.White,
+            color = replayInk(),
             textAlign = TextAlign.Center,
         )
         Spacer(Modifier.height(8.dp))
@@ -550,7 +563,7 @@ private fun EmptyReplay(period: ReplayPeriod) {
                     "minute is counted here on the device, and nothing is sent anywhere."
             },
             style = MaterialTheme.typography.bodyMedium,
-            color = Color.White.copy(alpha = 0.6f),
+            color = replayInk().copy(alpha = 0.6f),
             textAlign = TextAlign.Center,
         )
     }

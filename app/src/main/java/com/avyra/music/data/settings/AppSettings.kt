@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
+import androidx.media3.common.Player
 import com.avyra.music.BuildConfig
 import com.avyra.music.auth.AuthStore
 import com.avyra.music.data.lyrics.LyricsSource
@@ -196,6 +197,12 @@ object AppSettings {
     /** Keep playing similar music once the queue runs out. */
     val autoplay = MutableStateFlow(true)
 
+    /** Whether Avyra's visible queue is currently held in shuffled order. */
+    val shuffleEnabled = MutableStateFlow(false)
+
+    /** ExoPlayer repeat mode restored when the playback service is recreated. */
+    val repeatMode = MutableStateFlow(Player.REPEAT_MODE_OFF)
+
     /** Put the playing track's codec, bitrate and sample rate on the player. */
     val showNerdStats = MutableStateFlow(false)
 
@@ -233,6 +240,9 @@ object AppSettings {
 
     /** Drops haze blur (status bar, mini player, bottom fade, lyrics focus) for a solid-fill look. */
     val reduceDynamicBlur = MutableStateFlow(false)
+
+    /** Blurs lyric lines away from the active line while synced lyrics are playing. */
+    val lyricsBlur = MutableStateFlow(true)
 
     /**
      * Plays a looping video behind the cover art on the player when one is
@@ -351,11 +361,16 @@ object AppSettings {
     val lastfmEndpoint = MutableStateFlow("")
     val lastfmScrobbleEnabled = MutableStateFlow(false)
     val lastfmNowPlaying = MutableStateFlow(false)
+    val lastfmPrimaryArtistOnly = MutableStateFlow(false)
     val scrobbleMinDuration = MutableStateFlow(30)
     val scrobbleDelayPercent = MutableStateFlow(0.5f)
     val scrobbleDelaySeconds = MutableStateFlow(180)
     val listenBrainzEnabled = MutableStateFlow(false)
     val listenBrainzToken = MutableStateFlow("")
+    val listenBrainzPrimaryArtistOnly = MutableStateFlow(false)
+
+    /** Hides short clips, ringtones and other obvious non-music from the local library. */
+    val filterNonMusicAudio = MutableStateFlow(true)
     val spotifySpdcToken = MutableStateFlow("")
 
     // ── Discord Rich Presence ───────────────────────────────────────────
@@ -495,6 +510,8 @@ object AppSettings {
             ThemeMode.valueOf(prefs.getString(KEY_THEME, null) ?: "DARK")
         }.getOrDefault(ThemeMode.DARK)
         autoplay.value = prefs.getBoolean(KEY_AUTOPLAY, true)
+        shuffleEnabled.value = prefs.getBoolean(KEY_SHUFFLE_ENABLED, false)
+        repeatMode.value = prefs.getInt(KEY_REPEAT_MODE, Player.REPEAT_MODE_OFF)
         showNerdStats.value = prefs.getBoolean(KEY_NERD_STATS, false)
         reduceAnimation.value = prefs.getBoolean(KEY_REDUCE_ANIMATION, false)
         stopOnTaskRemoved.value = prefs.getBoolean(KEY_STOP_ON_TASK_REMOVED, true)
@@ -503,6 +520,7 @@ object AppSettings {
         dontRepeatSuggestions.value = prefs.getBoolean(KEY_DONT_REPEAT_SUGGESTIONS, false)
         convertVideoToAudio.value = prefs.getBoolean(KEY_CONVERT_VIDEO_TO_AUDIO, true)
         reduceDynamicBlur.value = prefs.getBoolean(KEY_REDUCE_BLUR, false)
+        lyricsBlur.value = prefs.getBoolean(KEY_LYRICS_BLUR, true)
         animatedCanvas.value = prefs.getBoolean(KEY_ANIMATED_CANVAS, true)
         canvasOverCellular.value = prefs.getBoolean(KEY_CANVAS_OVER_CELLULAR, false)
         fullBleedArtwork.value = prefs.getBoolean(KEY_FULL_BLEED_ARTWORK, true)
@@ -520,11 +538,14 @@ object AppSettings {
         lastfmEndpoint.value = prefs.getString(KEY_LASTFM_ENDPOINT, "").orEmpty()
         lastfmScrobbleEnabled.value = prefs.getBoolean(KEY_LASTFM_SCROBBLE_ENABLED, false)
         lastfmNowPlaying.value = prefs.getBoolean(KEY_LASTFM_NOW_PLAYING, false) && lastfmScrobbleEnabled.value
+        lastfmPrimaryArtistOnly.value = prefs.getBoolean(KEY_LASTFM_PRIMARY_ARTIST_ONLY, false)
         scrobbleMinDuration.value = prefs.getInt(KEY_SCROBBLE_MIN_DURATION, 30)
         scrobbleDelayPercent.value = prefs.getFloat(KEY_SCROBBLE_DELAY_PERCENT, 0.5f)
         scrobbleDelaySeconds.value = prefs.getInt(KEY_SCROBBLE_DELAY_SECONDS, 180)
         listenBrainzEnabled.value = prefs.getBoolean(KEY_LISTENBRAINZ_ENABLED, false)
         listenBrainzToken.value = prefs.getString(KEY_LISTENBRAINZ_TOKEN, "").orEmpty()
+        listenBrainzPrimaryArtistOnly.value = prefs.getBoolean(KEY_LISTENBRAINZ_PRIMARY_ARTIST_ONLY, false)
+        filterNonMusicAudio.value = prefs.getBoolean(KEY_FILTER_NON_MUSIC_AUDIO, true)
         spotifySpdcToken.value = prefs.getString(KEY_SPOTIFY_SPDC_TOKEN, "").orEmpty()
         replayGenres.value = prefs.getBoolean(KEY_REPLAY_GENRES, true)
         pinnedPlaylists.value = readPinnedPlaylists()
@@ -642,6 +663,16 @@ object AppSettings {
     fun setAutoplay(value: Boolean) {
         autoplay.value = value
         prefs.edit().putBoolean(KEY_AUTOPLAY, value).apply()
+    }
+
+    fun setShuffleEnabled(value: Boolean) {
+        shuffleEnabled.value = value
+        prefs.edit().putBoolean(KEY_SHUFFLE_ENABLED, value).apply()
+    }
+
+    fun setRepeatMode(value: Int) {
+        repeatMode.value = value
+        prefs.edit().putInt(KEY_REPEAT_MODE, value).apply()
     }
 
     fun setAudioQualityWifi(value: AudioQuality) {
@@ -797,6 +828,11 @@ object AppSettings {
         prefs.edit().putBoolean(KEY_REDUCE_BLUR, value).apply()
     }
 
+    fun setLyricsBlur(value: Boolean) {
+        lyricsBlur.value = value
+        prefs.edit().putBoolean(KEY_LYRICS_BLUR, value).apply()
+    }
+
     fun setSyncedLyrics(value: Boolean) {
         syncedLyrics.value = value
         prefs.edit().putBoolean(KEY_SYNCED_LYRICS, value).apply()
@@ -929,6 +965,11 @@ object AppSettings {
         prefs.edit().putBoolean(KEY_LASTFM_NOW_PLAYING, value).apply()
     }
 
+    fun setLastfmPrimaryArtistOnly(value: Boolean) {
+        lastfmPrimaryArtistOnly.value = value
+        prefs.edit().putBoolean(KEY_LASTFM_PRIMARY_ARTIST_ONLY, value).apply()
+    }
+
     fun setScrobbleMinDuration(value: Int) {
         scrobbleMinDuration.value = value
         prefs.edit().putInt(KEY_SCROBBLE_MIN_DURATION, value).apply()
@@ -952,6 +993,16 @@ object AppSettings {
     fun setListenBrainzToken(value: String) {
         listenBrainzToken.value = value
         prefs.edit().putString(KEY_LISTENBRAINZ_TOKEN, value).apply()
+    }
+
+    fun setListenBrainzPrimaryArtistOnly(value: Boolean) {
+        listenBrainzPrimaryArtistOnly.value = value
+        prefs.edit().putBoolean(KEY_LISTENBRAINZ_PRIMARY_ARTIST_ONLY, value).apply()
+    }
+
+    fun setFilterNonMusicAudio(value: Boolean) {
+        filterNonMusicAudio.value = value
+        prefs.edit().putBoolean(KEY_FILTER_NON_MUSIC_AUDIO, value).apply()
     }
 
     /** Writes through to the encrypted store; pass "" to disconnect. */
@@ -1160,6 +1211,8 @@ object AppSettings {
     private const val EQ_MAX_DB = 12f
     private const val KEY_THEME = "theme_mode"
     private const val KEY_AUTOPLAY = "autoplay"
+    private const val KEY_SHUFFLE_ENABLED = "shuffle_enabled"
+    private const val KEY_REPEAT_MODE = "repeat_mode"
     private const val KEY_NERD_STATS = "show_nerd_stats"
     private const val KEY_CACHE_LIMIT = "audio_cache_limit_bytes"
     private const val KEY_REDUCE_ANIMATION = "reduce_animation"
@@ -1169,6 +1222,7 @@ object AppSettings {
     private const val KEY_DONT_REPEAT_SUGGESTIONS = "dont_repeat_suggestions"
     private const val KEY_CONVERT_VIDEO_TO_AUDIO = "convert_video_to_audio"
     private const val KEY_REDUCE_BLUR = "reduce_dynamic_blur"
+    private const val KEY_LYRICS_BLUR = "lyrics_blur"
     private const val KEY_ANIMATED_CANVAS = "animated_canvas"
     private const val KEY_CANVAS_OVER_CELLULAR = "canvas_over_cellular"
     private const val KEY_FULL_BLEED_ARTWORK = "full_bleed_artwork"
@@ -1187,11 +1241,14 @@ object AppSettings {
     private const val KEY_LASTFM_ENDPOINT = "lastfm_endpoint"
     private const val KEY_LASTFM_SCROBBLE_ENABLED = "lastfm_scrobble_enabled"
     private const val KEY_LASTFM_NOW_PLAYING = "lastfm_now_playing"
+    private const val KEY_LASTFM_PRIMARY_ARTIST_ONLY = "lastfm_primary_artist_only"
     private const val KEY_SCROBBLE_MIN_DURATION = "scrobble_min_duration"
     private const val KEY_SCROBBLE_DELAY_PERCENT = "scrobble_delay_percent"
     private const val KEY_SCROBBLE_DELAY_SECONDS = "scrobble_delay_seconds"
     private const val KEY_LISTENBRAINZ_ENABLED = "listenbrainz_enabled"
     private const val KEY_LISTENBRAINZ_TOKEN = "listenbrainz_token"
+    private const val KEY_LISTENBRAINZ_PRIMARY_ARTIST_ONLY = "listenbrainz_primary_artist_only"
+    private const val KEY_FILTER_NON_MUSIC_AUDIO = "filter_non_music_audio"
     private const val KEY_SPOTIFY_SPDC_TOKEN = "spotify_spdc_token"
 
     private const val KEY_DISCORD_USERNAME = "discord_username"

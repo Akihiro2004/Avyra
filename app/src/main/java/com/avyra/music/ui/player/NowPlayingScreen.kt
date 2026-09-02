@@ -2529,6 +2529,7 @@ private fun LyricsPanel(
     val keepScroll = remember(listState) { keepScrollInList(listState) }
     var browsing by remember { mutableStateOf(false) }
     val reduceDynamicBlur by AppSettings.reduceDynamicBlur.collectAsStateWithLifecycle()
+    val lyricsBlur by AppSettings.lyricsBlur.collectAsStateWithLifecycle()
     val reduceAnimation by AppSettings.reduceAnimation.collectAsStateWithLifecycle()
 
     // The bloom is a blurred copy of the line, so it is off wherever blur is:
@@ -2538,7 +2539,7 @@ private fun LyricsPanel(
     // switch for exactly this kind of flourish, and reduce dynamic blur
     // because adding a blur under a setting that says it drops them would be
     // the app disagreeing with itself.
-    val glowing = !reduceAnimation && !reduceDynamicBlur &&
+    val glowing = !reduceAnimation && !reduceDynamicBlur && lyricsBlur &&
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
 
     // Only a finger on the list counts as browsing — watching
@@ -2644,6 +2645,13 @@ private fun LyricsPanel(
             val offset = if (activeLine < 0) 0 else index - activeLine
             val distance = abs(offset)
             val isActive = index == activeLine || index == alsoActive
+            val blur by animateDpAsState(
+                targetValue = when {
+                    reduceDynamicBlur || !lyricsBlur || browsing || isActive -> 0.dp
+                    else -> (distance * 1.6f).coerceAtMost(7f).dp
+                },
+                label = "lyricBlur",
+            )
             // Lines already sung stay close to legible — they're what the eye
             // just read and glances back to. Lines still to come fade faster
             // and further, so the panel reads as an arrival rather than a wall
@@ -2667,6 +2675,7 @@ private fun LyricsPanel(
                     contentDescription = "Instrumental",
                     tint = Color.White.copy(alpha = lineAlpha),
                     modifier = Modifier
+                        .blur(blur, BlurredEdgeTreatment.Unbounded)
                         .clip(RoundedCornerShape(10.dp))
                         .clickable { onSeekToLine(line.timeMs) }
                         // Matches the inset every sung line carries, so the
@@ -2702,6 +2711,7 @@ private fun LyricsPanel(
                         transformOrigin = TransformOrigin(0f, 0.5f)
                         alpha = lineAlpha
                     }
+                    .blur(blur, BlurredEdgeTreatment.Unbounded)
                     .clip(RoundedCornerShape(10.dp))
                     .clickable { onSeekToLine(line.timeMs) }
                 // Lead and answering vocal are one row: they are one line of

@@ -795,7 +795,7 @@ object SourceResolver {
                 }
                 // Something usable is in hand. Everything better than it is a
                 // maybe, and waiting for a maybe costs the listener a certainty.
-                if (best != null) break
+                if (best != null && !waitForAll) break
             }
         } finally {
             running.forEach { it.cancel() }
