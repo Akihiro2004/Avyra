@@ -324,8 +324,8 @@ dependencies {
     implementation("androidx.palette:palette-ktx:1.0.0")
 
     // ---- Frosted glass / progressive blur (Telegram-style bars) ----
-    implementation("dev.chrisbanes.haze:haze:1.3.1")
-    implementation("dev.chrisbanes.haze:haze-materials:1.3.1")
+    implementation("dev.chrisbanes.haze:haze:1.7.3")
+    implementation("dev.chrisbanes.haze:haze-materials:1.7.3")
 
     // ---- QR encoding, for the party invite ----
     // `core` only: nothing here scans a code, it only draws one (ui/components/QrCode).
