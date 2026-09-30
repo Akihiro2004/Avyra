@@ -10,7 +10,7 @@ This file records user-facing changes. Development details still live in the Git
 
 - Everything from BitChord 1.7.1: the new player, multiple YouTube accounts, the reworked equalizer (your old 10-band curve carries over), the faster stream resolver, the liquid-glass look option and Replay.
 - The app picks up where you left off. The last song, the whole queue and the position are saved, so after closing the app (or the phone killing it) the mini player shows the song and one tap on play carries on from the same second. Shuffle order is kept too.
-- Listen Together is back: start a party, share the link or QR code, and up to five people hear the same thing in sync and can add to the queue. It runs on a party server you host yourself (see backend/README.md).
+- Listen Together is back: start a party, share the link or QR code, and up to five people hear the same thing in sync and can add to the queue. Works out of the box; you can also point it at your own party server (see backend/README.md).
 
 ### Fixed
 
