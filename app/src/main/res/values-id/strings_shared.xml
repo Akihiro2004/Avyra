@@ -95,4 +95,11 @@
     <string name="hdmi_output">HDMI</string>
     <string name="personal_phone">%1$s’s Phone</string>
     <string name="this_phone">This phone</string>
+    <string name="automix_stopped_in_party">Automix: dihentikan saat Dengar bersama</string>
+    <string name="listen_together_jam">Sesi %1$s</string>
+    <string name="listen_together_jam_unnamed">Mendengar bersama</string>
+    <string name="listen_together_manage">Kelola</string>
+    <string name="listen_together_open">Dengar bersama</string>
+    <string name="listen_together_open_count">Mendengar bersama · %1$d</string>
+    <string name="played_by">Played by %1$s</string>
 </resources>

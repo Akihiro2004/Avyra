@@ -1,3 +1,4 @@
+import java.net.URI
 import java.util.Properties
 import java.io.FileInputStream
 
@@ -43,6 +44,21 @@ val localProps = Properties().apply {
     if (file.exists()) file.inputStream().use { load(it) }
 }
 val moduleIndexUrl: String = localProps.getProperty("MODULE_INDEX_URL", "")
+/*
+ * The Listen Together party server (backend/, deployed to your own VPS), e.g.
+ * LISTEN_TOGETHER_SERVER=https://jam.example.com in local.properties. It is the
+ * default server and the host of https://<host>/invite/<CODE> links. Blank
+ * still builds: the Listen Together screen then asks for an address.
+ */
+val listenTogetherServer: String = (
+    localProps.getProperty("LISTEN_TOGETHER_SERVER")
+        ?: System.getenv("LISTEN_TOGETHER_SERVER")
+        ?: ""
+    ).trim().trimEnd('/')
+// The manifest needs *some* host for the https invite filter; ".invalid" can never resolve.
+val listenTogetherInviteHost: String = runCatching {
+    URI(listenTogetherServer).takeIf { it.scheme == "https" }?.host
+}.getOrNull() ?: "invite.invalid"
 val updateApiUrl: String = localProps.getProperty("AVYRA_UPDATE_API_URL", "")
 val discordApplicationId: String = localProps.getProperty("AVYRA_DISCORD_APPLICATION_ID", "")
 val lastfmApiKey: String = (
@@ -83,6 +99,12 @@ android {
         // Last.fm credentials are supplied locally and never committed.
         buildConfigField("String", "LASTFM_API_KEY", "\"${lastfmApiKey.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
         buildConfigField("String", "LASTFM_SECRET", "\"${lastfmSecret.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
+        buildConfigField(
+            "String",
+            "LISTEN_TOGETHER_SERVER",
+            "\"${listenTogetherServer.replace("\\", "\\\\").replace("\"", "\\\"")}\"",
+        )
+        manifestPlaceholders["jamInviteHost"] = listenTogetherInviteHost
 
         // Automix's DSP analyzer (native/analyzer). 64-bit only: minSdk 26
         // already postdates the 64-bit requirement, so a 32-bit slice would
@@ -304,6 +326,10 @@ dependencies {
     // ---- Frosted glass / progressive blur (Telegram-style bars) ----
     implementation("dev.chrisbanes.haze:haze:1.3.1")
     implementation("dev.chrisbanes.haze:haze-materials:1.3.1")
+
+    // ---- QR encoding, for the party invite ----
+    // `core` only: nothing here scans a code, it only draws one (ui/components/QrCode).
+    implementation("com.google.zxing:core:3.5.3")
 
     // ---- Markdown rendering (release notes in the update dialog) ----
     // Pure Compose, not an AndroidView wrapper — needed so the text composes

@@ -171,7 +171,8 @@ private class QueueTracks(
 private fun splitQueue(queue: List<Song>, currentIndex: Int): QueueTracks {
     if (currentIndex !in queue.indices) return QueueTracks.EMPTY
     // Keyed by the entry's own id, so a row keeps its identity through a reorder.
-    // Entries without one (a queue restored from before ids existed) fall back to the song plus how many times it has come up so far
+    // Entries without one (a party's tracks, a queue restored from before ids
+    // existed) fall back to the song plus how many times it has come up so far
     // — never its position, which changes on every swap and would end the drag.
     val seen = HashMap<String, Int>()
     val occurrence = IntArray(queue.size) { i ->
@@ -205,11 +206,17 @@ internal fun InlineQueue(
     queue: List<Song>,
     currentIndex: Int,
     autoplayEnabled: Boolean,
+    /**
+     * Read-only: the party's running order is the host's while this is set, so
+     * the queue is here to be looked at and scrolled, not worked.
+     */
+    controlsLocked: Boolean,
     onJumpTo: (Int) -> Unit,
     onRemove: (Int) -> Unit,
     onMove: (Int, Int) -> Unit,
     onClear: () -> Unit,
     onScrollingChange: (Boolean) -> Unit = {},
+    onDragActiveChange: (Boolean) -> Unit = {},
     /** Phone only: let queue scrolling dismiss/restore the lower half player. */
     collapsePlayerOnScroll: Boolean = false,
     onRevealPlayer: () -> Unit = {},
@@ -227,7 +234,7 @@ internal fun InlineQueue(
         onHide = onHidePlayer,
     )
     val tracks = remember(queue, currentIndex) { splitQueue(queue, currentIndex) }
-    val drag = rememberQueueDrag(listState, tracks, onMove)
+    val drag = rememberQueueDrag(listState, tracks, onMove, onDragActiveChange)
     val nowPlaying = tracks.nowPlaying
     val contextSong = tracks.context.firstOrNull()?.song
     val contextTitle = contextSong?.playbackSource?.takeIf { it.isNotBlank() }
@@ -262,7 +269,7 @@ internal fun InlineQueue(
                 modifier = Modifier.weight(1f),
             )
             if (tracks.user.isNotEmpty()) {
-                QueueClearButton(MaterialTheme.typography.titleMedium, onClear)
+                QueueClearButton(MaterialTheme.typography.titleMedium, controlsLocked, onClear)
             }
         }
         Spacer(Modifier.height(4.dp))
@@ -295,6 +302,7 @@ internal fun InlineQueue(
                             isCurrent = true,
                             onClick = { onJumpTo(nowPlaying.timelineIndex) },
                             onRemove = { onRemove(nowPlaying.timelineIndex) },
+                            locked = controlsLocked,
                             modifier = queueMotion(),
                         )
                     }
@@ -305,10 +313,10 @@ internal fun InlineQueue(
                             title = stringResource(R.string.next_in_queue),
                             modifier = Modifier.padding(top = 16.dp, bottom = 6.dp).then(queueMotion()),
                         ) {
-                            QueueClearButton(MaterialTheme.typography.labelLarge, onClear)
+                            QueueClearButton(MaterialTheme.typography.labelLarge, controlsLocked, onClear)
                         }
                     }
-                    queueSection(tracks.user, QueueSection.USER, drag, onJumpTo, onRemove)
+                    queueSection(tracks.user, QueueSection.USER, drag, controlsLocked, onJumpTo, onRemove)
                 }
                 if (tracks.context.isNotEmpty()) {
                     item(key = "header-context") {
@@ -321,13 +329,13 @@ internal fun InlineQueue(
                             modifier = Modifier.padding(top = 16.dp, bottom = 6.dp).then(queueMotion()),
                         )
                     }
-                    queueSection(tracks.context, QueueSection.CONTEXT, drag, onJumpTo, onRemove)
+                    queueSection(tracks.context, QueueSection.CONTEXT, drag, controlsLocked, onJumpTo, onRemove)
                 }
                 if (autoplayEnabled || tracks.autoplay.isNotEmpty()) {
                     item(key = "autoplay-heading") {
                         AutoplayHeading(hasTracks = tracks.autoplay.isNotEmpty(), modifier = queueMotion())
                     }
-                    queueSection(tracks.autoplay, QueueSection.AUTOPLAY, drag, onJumpTo, onRemove)
+                    queueSection(tracks.autoplay, QueueSection.AUTOPLAY, drag, controlsLocked, onJumpTo, onRemove)
                 }
             }
             // The held row, drawn over the list where the finger is. Positioned
@@ -360,6 +368,7 @@ private fun LazyListScope.queueSection(
     rows: List<QueueTrack>,
     section: QueueSection,
     drag: QueueDrag,
+    locked: Boolean,
     onJumpTo: (Int) -> Unit,
     onRemove: (Int) -> Unit,
 ) {
@@ -375,7 +384,8 @@ private fun LazyListScope.queueSection(
             isCurrent = false,
             onClick = { onJumpTo(track.timelineIndex) },
             onRemove = { onRemove(track.timelineIndex) },
-            draggable = true,
+            locked = locked,
+            draggable = !locked,
             onDragStart = { drag.start(track.key, section) },
             onDrag = drag::drag,
             onDragEnd = { drag.end(track.key) },
@@ -402,14 +412,14 @@ private fun QueueHeading(
 }
 
 @Composable
-private fun QueueClearButton(style: TextStyle, onClear: () -> Unit) {
+private fun QueueClearButton(style: TextStyle, locked: Boolean, onClear: () -> Unit) {
     Text(
         text = stringResource(R.string.clear),
         style = style,
-        color = Color.White.copy(alpha = 0.75f),
+        color = Color.White.copy(alpha = if (locked) 0.25f else 0.75f),
         modifier = Modifier
             .clip(RoundedCornerShape(percent = 50))
-            .clickable(onClick = onClear)
+            .clickable(enabled = !locked, onClick = onClear)
             .padding(horizontal = 8.dp, vertical = 4.dp),
     )
 }
@@ -497,10 +507,12 @@ private fun rememberQueueDrag(
     listState: LazyListState,
     tracks: QueueTracks,
     onMove: (Int, Int) -> Unit,
+    onActiveChange: (Boolean) -> Unit,
 ): QueueDrag {
     val drag = remember(listState) { QueueDrag(listState) }
     drag.tracks = tracks
     drag.onMove = onMove
+    drag.onActiveChange = onActiveChange
     with(LocalDensity.current) {
         drag.edgeZone = QUEUE_EDGE_SCROLL_ZONE.toPx()
         drag.edgeSpeed = QUEUE_EDGE_SCROLL_SPEED.toPx()
@@ -540,6 +552,9 @@ private class QueueDrag(private val listState: LazyListState) {
     var tracks = QueueTracks.EMPTY
     var onMove: (Int, Int) -> Unit = { _, _ -> }
 
+    /** See [PartySync.beginQueueDrag]: a jam hears about the reorder once, on drop. */
+    var onActiveChange: (Boolean) -> Unit = {}
+
     /** [QUEUE_EDGE_SCROLL_ZONE] and [QUEUE_EDGE_SCROLL_SPEED], in pixels. */
     var edgeZone = 0f
     var edgeSpeed = 0f
@@ -576,6 +591,7 @@ private class QueueDrag(private val listState: LazyListState) {
         heldTop = item.offset.toFloat()
         awaiting = null
         held = track
+        onActiveChange(true)
     }
 
     fun drag(deltaY: Float) = settle(deltaY)
@@ -587,6 +603,7 @@ private class QueueDrag(private val listState: LazyListState) {
         held = null
         awaiting = null
         setAutoScroll(0f)
+        onActiveChange(false)
     }
 
     private fun settle(deltaY: Float) {
@@ -675,6 +692,8 @@ private fun InlineQueueRow(
     onClick: () -> Unit,
     onRemove: () -> Unit,
     modifier: Modifier = Modifier,
+    /** @see InlineQueue */
+    locked: Boolean = false,
     /** Shows the handle; drags on it go to the callbacks below. */
     draggable: Boolean = false,
     /** The copy drawn under the finger while the row is being moved. */
@@ -688,7 +707,9 @@ private fun InlineQueueRow(
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
             .background(if (lifted) Color.White.copy(alpha = 0.06f) else Color.Transparent)
-            .clickable(onClick = onClick)
+            // Disabled rather than ignored: a tap that ripples and then does
+            // nothing reads as the app having missed it.
+            .clickable(enabled = !locked, onClick = onClick)
             .padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -749,19 +770,21 @@ private fun InlineQueueRow(
             )
             Spacer(Modifier.width(10.dp))
         }
-        Box(
-            modifier = Modifier
-                .size(32.dp)
-                .clip(CircleShape)
-                .clickable(onClick = onRemove),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                Icons.Rounded.Close,
-                contentDescription = stringResource(R.string.remove_from_queue),
-                tint = Color.White.copy(alpha = 0.55f),
-                modifier = Modifier.size(18.dp),
-            )
+        if (!locked) {
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .clip(CircleShape)
+                    .clickable(onClick = onRemove),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Rounded.Close,
+                    contentDescription = stringResource(R.string.remove_from_queue),
+                    tint = Color.White.copy(alpha = 0.55f),
+                    modifier = Modifier.size(18.dp),
+                )
+            }
         }
     }
 }

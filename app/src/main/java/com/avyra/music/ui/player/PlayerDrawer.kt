@@ -87,9 +87,10 @@ private const val DISMISS_DRAG_FRACTION = 0.25f
 
 /**
  * The bottom-edge drawer shell every player sheet in this package puts up —
- * [AudioOutputSheet] among them: dark over a scrim, a grab handle, a title,
- * drag down to put it away. Pulled out so the drag gesture, the scrim fade tied
- * to it, and the haze background live in exactly one place.
+ * [AudioOutputSheet] and [ListenTogetherMembersSheet] alike: dark over a
+ * scrim, a grab handle, a title, drag down to put it away. Pulled out because
+ * the drag gesture, the scrim fade tied to it, and the haze background are
+ * identical between the two and worth keeping in exactly one place.
  */
 @OptIn(ExperimentalHazeMaterialsApi::class)
 @Composable

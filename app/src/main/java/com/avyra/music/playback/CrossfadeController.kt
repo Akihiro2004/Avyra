@@ -9,6 +9,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.Timeline
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import com.avyra.music.data.listentogether.ListenTogether
 import com.avyra.music.data.settings.AppSettings
 import com.avyra.music.data.settings.MixBlend
 import com.avyra.music.data.settings.SmartAnalysis
@@ -727,11 +728,34 @@ class CrossfadeController(
         val player = active()
         if (!player.isPlaying) return
         // Not while a version swap owns the standby player — see
-        // [versionSwapActive]. Nothing to clean up on the way out: a version
-        // swap is a between-tracks affair on the same item, so the transition
-        // window and mix flag it would have armed still describe the next
-        // track correctly once the swap lets go.
+        // [versionSwapActive]. Nothing to clean up on the way out unlike the
+        // party case below: a version swap is a between-tracks affair on the
+        // same item, so the transition window and mix flag it would have
+        // armed still describe the next track correctly once the swap lets go.
         if (versionSwapActive()) return
+        // Not while listening together. A blend starts the next track early, by
+        // a length this device decides for itself from its own copy of the
+        // audio — so in a party every member would begin the next song at a
+        // different moment, and each would then be dragged back by a correcting
+        // seek. The transition a party shares is the plain one: whoever reaches
+        // the end first publishes the change and everybody moves together. See
+        // [PartySync].
+        //
+        // The analysis behind it stops too, including a pass already running —
+        // see [com.avyra.music.playback.smart.TrackAnalyzer], which reads
+        // the party for itself. Nothing here asks for one while this returns,
+        // but a request made a tick before the party started would otherwise
+        // run to completion: a whole-track decode and two model passes, spent
+        // on a transition that cannot happen.
+        if (ListenTogether.state.value.inParty) {
+            // Left behind by the last pair planned before the party started.
+            // The marker describes a transition that is no longer going to
+            // happen, and the flag a mix that is no longer running; both would
+            // otherwise sit on screen for as long as the party lasts.
+            AppSettings.smartTransitionWindow.value = null
+            AppSettings.smartMixInProgress.value = false
+            return
+        }
         // Nothing to transition *into*, so any analysis state left over from the
         // previous pair is stale — the last track of a queue should not still be
         // claiming both songs are measured.
@@ -2373,7 +2397,7 @@ class CrossfadeController(
      * One step of the ease, when the playhead has crossed the next bar.
      * Measured on the track's own position so a pause holds it. Anything that
      * moves the listener off the stretched track — a skip, the next song, a
-     * seek backwards, the player no longer being the
+     * seek backwards, a party starting, the player no longer being the
      * session's — ends it on the listener's speed at once.
      */
     private fun driveEase() {
@@ -2381,7 +2405,8 @@ class CrossfadeController(
         val position = player.currentPosition
         if (player !== active() ||
             player.currentMediaItemIndex != easeItemIndex ||
-            position < easeNextAtMs - 2 * easeStepMs
+            position < easeNextAtMs - 2 * easeStepMs ||
+            ListenTogether.state.value.inParty
         ) {
             endEase()
             return

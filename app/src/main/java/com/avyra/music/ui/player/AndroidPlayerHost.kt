@@ -12,6 +12,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import com.avyra.music.data.canvas.CanvasArtwork
 import com.avyra.music.data.canvas.CanvasRepository
+import com.avyra.music.data.listentogether.ListenTogether
 import com.avyra.music.data.lyrics.LyricLine
 import com.avyra.music.data.lyrics.LyricsTranslation
 import com.avyra.music.data.model.Song
@@ -34,7 +35,7 @@ import kotlin.math.roundToInt
 
 /**
  * The phone's answers to [PlayerHost]: AppSettings, the Media3 Canvas decoder,
- * AudioRouting and the music stream's volume, and the lyric
+ * AudioRouting and the music stream's volume, the party, and the lyric
  * translation endpoint — each exactly what the player read directly before it
  * moved into the shared module.
  */
@@ -105,6 +106,12 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
             .stateIn(scope, SharingStarted.Eagerly, AudioOutputStatus.current.value.toOutputFormat())
     }
 
+    override val party: StateFlow<PartyUi> by lazy {
+        ListenTogether.state
+            .map { it.toPartyUi() }
+            .stateIn(scope, SharingStarted.Eagerly, ListenTogether.state.value.toPartyUi())
+    }
+
     override suspend fun translateLyrics(
         trackId: String,
         lines: List<LyricLine>,
@@ -158,6 +165,14 @@ private fun AudioOutputStatus.Snapshot.toOutputFormat(): OutputFormatUi {
     }
     return OutputFormatUi(summary = summary, carriesHiRes = carriesHiRes)
 }
+
+private fun ListenTogether.State.toPartyUi() = PartyUi(
+    inParty = inParty,
+    controlsLocked = controlsLocked,
+    members = members,
+    you = you,
+    code = code,
+)
 
 /**
  * The music stream's volume. Hardware keys and the system panel change it

@@ -195,6 +195,29 @@
                 <data android:host="youtu.be" />
             </intent-filter>
 
+            <!-- Listen Together invites on the party server's own domain
+                 (LISTEN_TOGETHER_SERVER). autoVerify opens Avyra directly once
+                 that server publishes /.well-known/assetlinks.json. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="https"
+                    android:host="${jamInviteHost}"
+                    android:pathPattern="/invite/......" />
+            </intent-filter>
+
+            <!-- avyra://party/<CODE>?server=..., which the server's invite page redirects to. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="avyra"
+                    android:host="party" />
+            </intent-filter>
+
             <!--
               Share → Avyra, from YT Music's own share sheet or from
               anywhere a link can be sent. The text is whatever the sending app

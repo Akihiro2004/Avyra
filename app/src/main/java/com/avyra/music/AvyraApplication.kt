@@ -26,6 +26,7 @@ import com.avyra.music.playback.LastPlayed
 import com.avyra.music.playback.OriginalVersion
 import com.avyra.music.data.innertube.Innertube
 import com.avyra.music.data.innertube.AndroidStreamHooks
+import com.avyra.music.data.listentogether.ListenTogether
 import com.avyra.music.data.scrobbling.LastFM
 import com.avyra.music.data.settings.AppSettings
 import com.avyra.music.data.settings.SearchHistory
@@ -45,7 +46,7 @@ class AvyraApplication : Application(), SingletonImageLoader.Factory {
         super.onCreate()
         LegacyDataMigration.migratePlainPreferences(this)
         // The player is drawn by the shared UI module; this is what it reads
-        // underneath — settings, the Canvas decoder, outputs.
+        // underneath — settings, the Canvas decoder, outputs, the party.
         AndroidStreamHooks.installEarly()
         PlayerPlatform.install(AndroidPlayerHost(this))
         com.avyra.music.ui.AppUi.install(com.avyra.music.ui.AndroidAppUiHost)
@@ -106,8 +107,14 @@ class AvyraApplication : Application(), SingletonImageLoader.Factory {
             CoroutineScope(Dispatchers.IO).launch { Innertube.ensureSessionScope() }
         }
         AppSettings.init(this, authStore)
+        // Restores a party this device is still a member of, so a process death
+        // mid-session is something the rest of the party never sees. The socket
+        // and the clock offset are not restored — both are re-established on
+        // the next connect, which is the only way to be sure they are current.
+        ListenTogether.init(this)
         SearchHistory.init(this)
         LastPlayed.init(this)
+        com.avyra.music.playback.PartyPersonalQueueStash.init(this)
         // Which tracks the listener has reverted to YouTube's own upload. Read
         // by [Song.toMediaItem], so it has to be open before the restart
         // snapshot below is turned back into queue items.
