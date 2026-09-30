@@ -802,8 +802,9 @@ fun SettingsScreen(
 
         SettingsGroup(
             header = "About",
-            footer = "Updates come from Avyra's official release page. " +
-                "Your browser and Android handle the download and installation.",
+            footer = "Updates come from Avyra's own releases and install here. " +
+                "Android asks you to confirm the install itself — that prompt is " +
+                "the system's and cannot be skipped.",
         ) {
             SettingsRow(
                 icon = Icons.Rounded.SystemUpdate,

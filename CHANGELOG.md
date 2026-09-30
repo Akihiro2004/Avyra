@@ -4,6 +4,18 @@ This file records user-facing changes. Development details still live in the Git
 
 ## Unreleased
 
+## 1.0.8 - 2026-09-06
+
+### Added
+
+- Updates install inside the app again. 1.0.6 removed this as a precaution and sent you to the releases page in a browser instead; the round trip turned out to cost more than the precaution was worth. The download runs in the app with a progress bar and resumes itself if the connection drops partway through, and the finished file is handed to Android's own installer — which still asks you to confirm, and still honours the per-app "install unknown apps" switch. Neither of those can be skipped by the app, which is the point. 1.0.6 and 1.0.7 have no installer, so this build has to be fetched from the browser once.
+
+## 1.0.7 - 2026-09-06
+
+### Fixed
+
+- Swiping right on the player to go back a song did nothing once you were more than ten seconds into a track. The gesture shared its action with the back button beside it, and back deliberately restarts the current song rather than stepping when you are that far in — right for a button you press to hear the intro again, wrong for a swipe, whose whole vocabulary is that left is the next song and right is the previous one. Swiping back now always steps to the previous track, and the back button keeps restarting as it did.
+
 ## 1.0.5 - 2026-08-31
 
 ### Fixed

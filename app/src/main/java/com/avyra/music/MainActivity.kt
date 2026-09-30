@@ -160,6 +160,7 @@ import com.avyra.music.ui.components.AppLanguageDialog
 import com.avyra.music.ui.components.LyricsSourcesDialog
 import com.avyra.music.ui.components.UpdateAvailableDialog
 import com.avyra.music.ui.icons.AvyraIcons
+import androidx.media3.common.C
 import androidx.media3.common.Player
 import com.avyra.music.data.YtMusicRepository
 import com.avyra.music.ui.player.NowPlayingScreen
@@ -376,11 +377,27 @@ private fun AvyraApp(
     var showUpdateDialog by remember { mutableStateOf(false) }
     val updateAvailable by viewModel.updateAvailable.collectAsStateWithLifecycle()
 
-    // The check the user asked for. Kept apart from [updateAvailable], which is
-    // the silent launch poll and says nothing when there is no update — see
-    // [AppUpdateChecker.CheckState].
+    // The check the user asked for, and the download it turns into. Kept apart
+    // from [updateAvailable], which is the silent launch poll and says nothing
+    // when there is no update — see [AppUpdateChecker.CheckState].
     val seenOnboarding by AppSettings.seenOnboarding.collectAsStateWithLifecycle()
     val checkState by AppUpdateChecker.checkState.collectAsStateWithLifecycle()
+    val updateDownload by AppUpdateChecker.download.collectAsStateWithLifecycle()
+
+    // One tap, not three. A check that finds something goes straight on to
+    // fetching it, and a fetch that lands goes straight on to the installer —
+    // the listener asked for the update, not for a tour of its stages. The one
+    // step that cannot be automated is Android's own install prompt.
+    LaunchedEffect(checkState) {
+        if (checkState is AppUpdateChecker.CheckState.Found) {
+            AppUpdateChecker.downloadApk(context)
+        }
+    }
+    LaunchedEffect(updateDownload) {
+        (updateDownload as? AppUpdateChecker.DownloadState.Ready)?.let { ready ->
+            AppUpdateChecker.installApk(context, ready.file)
+        }
+    }
     // Outcomes nothing follows from clear themselves; the ones that are still
     // going stay up until they resolve.
     LaunchedEffect(checkState) {
@@ -1151,6 +1168,21 @@ private fun AvyraApp(
             },
             onNext = { controller?.seekToNextMediaItem() },
             onPrevious = { controller?.seekToPrevious() },
+            // Not [seekToPrevious], which is the back button's semantic: past
+            // BACK_RESTARTS_AFTER_MS it restarts the current track instead of
+            // stepping, and a swipe is asking for the queue rather than for
+            // back. Nor seekToPreviousMediaItem, which PlaybackService's
+            // SessionPlayer deliberately redirects to that same restart so the
+            // media notification behaves like the button. The index is asked
+            // for directly instead — off the same [Player.getPreviousMediaItemIndex]
+            // that answers hasPrevious, so the gesture's own guard and this
+            // cannot disagree about whether there is anywhere to go.
+            onPreviousTrack = {
+                controller?.let { player ->
+                    val target = player.previousMediaItemIndex
+                    if (target != C.INDEX_UNSET) player.seekToDefaultPosition(target)
+                }
+            },
             onSeekFraction = { fraction ->
                 controller?.let { player ->
                     // Read at the moment of the seek, not from the
@@ -1951,9 +1983,9 @@ private fun AvyraApp(
                     },
                 )
 
-                // Feedback for a check the listener asked for. Under the bar
-                // rather than over it, so the bar's own blur is what it drops
-                // out of.
+                // Feedback for a check the listener asked for, and for the
+                // download it turns into. Under the bar rather than over it, so
+                // the bar's own blur is what it drops out of.
                 StatusPill(
                     visible = checkState !is AppUpdateChecker.CheckState.Idle,
                     text = when (val state = checkState) {
@@ -1962,10 +1994,17 @@ private fun AvyraApp(
                             "Avyra ${BuildConfig.VERSION_NAME} is up to date"
                         is AppUpdateChecker.CheckState.NotConfigured -> "Updates are not set up"
                         is AppUpdateChecker.CheckState.Failed -> state.reason
-                        is AppUpdateChecker.CheckState.Found -> "Avyra ${state.version} available"
+                        is AppUpdateChecker.CheckState.Found -> when (val d = updateDownload) {
+                            is AppUpdateChecker.DownloadState.Downloading ->
+                                "Downloading ${(d.fraction * 100).toInt()}%"
+                            is AppUpdateChecker.DownloadState.Ready -> "Ready to install"
+                            is AppUpdateChecker.DownloadState.Failed -> d.message
+                            else -> "Avyra ${state.version} available"
+                        }
                         else -> ""
                     },
-                    busy = checkState is AppUpdateChecker.CheckState.Checking,
+                    busy = checkState is AppUpdateChecker.CheckState.Checking ||
+                        updateDownload is AppUpdateChecker.DownloadState.Downloading,
                     icon = when (checkState) {
                         is AppUpdateChecker.CheckState.UpToDate -> Icons.Rounded.CheckCircle
                         is AppUpdateChecker.CheckState.Failed,
@@ -2473,7 +2512,23 @@ private fun AvyraApp(
                     // sheet — only the sheet itself goes away. The top bar's
                     // update icon reopens it onto whatever state it reached.
                     onDismiss = { showUpdateDialog = false },
+                    onDownload = {
+                        if (update.apkUrl != null) {
+                            AppUpdateChecker.downloadApk(context)
+                        } else {
+                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(update.releaseUrl)))
+                            showUpdateDialog = false
+                        }
+                    },
+                    onCancelDownload = {
+                        AppUpdateChecker.cancelDownload()
+                    },
+                    onInstall = {
+                        val ready = AppUpdateChecker.download.value as? AppUpdateChecker.DownloadState.Ready
+                        ready?.let { AppUpdateChecker.installApk(context, it.file) }
+                    },
                     onOpenReleasePage = {
+                        AppUpdateChecker.resetDownload()
                         context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(update.releaseUrl)))
                         showUpdateDialog = false
                     },

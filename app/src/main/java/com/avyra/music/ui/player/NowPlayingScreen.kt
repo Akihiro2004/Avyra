@@ -590,6 +590,18 @@ fun NowPlayingScreen(
     onPlayPause: () -> Unit,
     onNext: () -> Unit,
     onPrevious: () -> Unit,
+    /**
+     * Step to the previous track, unconditionally — for the swipe, which is the
+     * one caller that means the queue rather than the back button.
+     *
+     * Separate from [onPrevious] because that one is Media3's back semantic:
+     * past [BACK_RESTARTS_AFTER_MS] into a track it restarts it instead of
+     * stepping, which is right for the transport glyph and wrong for a gesture
+     * whose whole vocabulary is "left is the next song, right is the previous
+     * one". Sharing the two is what made swiping back do nothing ten seconds
+     * into any song while swiping forward always worked.
+     */
+    onPreviousTrack: () -> Unit,
     onSeek: (Long) -> Unit,
     /**
      * Seek to a fraction of the track, for the scrubber.
@@ -1159,7 +1171,7 @@ fun NowPlayingScreen(
                                 }
                                 total >= swipeThreshold && hasPrevious -> {
                                     haptics.play(Haptic.SkipPrevious)
-                                    onPrevious()
+                                    onPreviousTrack()
                                 }
                             }
                             swipeOffset = 0f
