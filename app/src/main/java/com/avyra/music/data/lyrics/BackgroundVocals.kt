@@ -24,7 +24,7 @@ package com.avyra.music.data.lyrics
  * the lead already says "this is the answer" without the punctuation being
  * taken away.
  */
-internal fun List<LyricLine>.withBackgroundVocals(): List<LyricLine> =
+fun List<LyricLine>.withBackgroundVocals(): List<LyricLine> =
     map { it.splitTrailingBracket() }
 
 private fun LyricLine.splitTrailingBracket(): LyricLine {

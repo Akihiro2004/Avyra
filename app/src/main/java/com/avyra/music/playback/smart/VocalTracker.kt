@@ -24,8 +24,6 @@ package com.avyra.music.playback.smart
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
-import android.content.Context
-import android.util.Log
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -91,24 +89,35 @@ object VocalSpectrogram {
  * Only the vocals target is used. open-unmix trains four independent checkpoints; Avyra needs to
  * know how much vocal content is present at an instant, not to reconstruct four stems.
  */
-class VocalTracker(private val context: Context) {
+class VocalTracker(
+    /**
+     * Where the model lives, resolved lazily.
+     *
+     * A path rather than a [Context]: this is the only thing the tracker ever
+     * wanted the platform for, and each application already knows how to put
+     * its own copy of the weights somewhere readable — unpacked from assets on
+     * Android, from the jar's resources on the desktop.
+     */
+    private val modelPath: () -> String,
+    /** How many threads inference may use; the vocal-activity pass is the expensive one. */
+    private val inferenceThreads: () -> Int,
+) {
 
     @Volatile private var session: OrtSession? = null
+    @Volatile private var sessionThreads = 0
     private val lock = Any()
 
     private fun session(): OrtSession? {
-        session?.let { return it }
+        val threads = inferenceThreads()
+        session?.takeIf { sessionThreads == threads }?.let { return it }
         synchronized(lock) {
-            session?.let { return it }
+            session?.takeIf { sessionThreads == threads }?.let { return it }
+            runCatching { session?.close() }
+            session = null
             return runCatching {
-                val file = File(context.filesDir, MODEL_ASSET)
-                if (!file.exists() || file.length() == 0L) {
-                    context.assets.open(MODEL_ASSET).use { input ->
-                        file.outputStream().use { output -> input.copyTo(output) }
-                    }
-                }
+                val file = File(modelPath())
                 val options = OrtSession.SessionOptions().apply {
-                    setIntraOpNumThreads(INFERENCE_THREADS)
+                    setIntraOpNumThreads(threads)
                     setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
                     // Same reasoning as BeatTracker: the arena retains every block it allocates for
                     // the life of the session, which a backgrounded music player cannot justify.
@@ -116,8 +125,11 @@ class VocalTracker(private val context: Context) {
                     setMemoryPatternOptimization(false)
                 }
                 OrtEnvironment.getEnvironment().createSession(file.absolutePath, options)
-                    .also { session = it }
-            }.onFailure { Log.w(TAG, "Vocal model unavailable; no mask will be produced", it) }
+                    .also {
+                        session = it
+                        sessionThreads = threads
+                    }
+            }.onFailure { AnalysisLog.warn("Vocal model unavailable; no mask will be produced", it) }
                 .getOrNull()
         }
     }
@@ -137,7 +149,7 @@ class VocalTracker(private val context: Context) {
         val started = System.currentTimeMillis()
         val spectrogram = VocalSpectrogram.compute(resampledLeft, resampledRight) ?: return null
         if (spectrogram.frames > FIXED_FRAMES) {
-            Log.d(TAG, "Window of ${spectrogram.frames} frames exceeds the model's $FIXED_FRAMES")
+            AnalysisLog.warn("Window of ${spectrogram.frames} frames exceeds the model's $FIXED_FRAMES")
             return null
         }
         val active = session() ?: return null
@@ -171,15 +183,13 @@ class VocalTracker(private val context: Context) {
                     // average.
                     val target = (outputs.get(0) as OnnxTensor).floatBuffer
                     val curve = reduceToBandCurve(backing.asFloatBuffer(), target, bins, spectrogram.frames)
-                    Log.d(
-                        TAG,
-                        "vocal mask ${spectrogram.frames} frames in " +
+                    AnalysisLog.warn("vocal mask ${spectrogram.frames} frames in " +
                             "${System.currentTimeMillis() - started}ms",
                     )
                     curve
                 }
             }
-        }.onFailure { Log.w(TAG, "Vocal inference failed", it) }.getOrNull()
+        }.onFailure { AnalysisLog.warn("Vocal inference failed", it) }.getOrNull()
     }
 
     /**
@@ -252,14 +262,14 @@ class VocalTracker(private val context: Context) {
         synchronized(lock) {
             runCatching { session?.close() }
             session = null
+            sessionThreads = 0
         }
     }
 
     companion object {
         private const val TAG = "AvyraVocalTracker"
-        private const val MODEL_ASSET = "vocals_umxhq_int8.onnx"
-        private const val INFERENCE_THREADS = 4
-
+        /** The weights this tracker needs, named once for every build that ships them. */
+        const val MODEL_ASSET = "vocals_umxhq_int8.onnx"
         /** The model's fixed input width, ~22.8 s, chosen upstream to cover a transition overlap. */
         const val FIXED_FRAMES = 960
 

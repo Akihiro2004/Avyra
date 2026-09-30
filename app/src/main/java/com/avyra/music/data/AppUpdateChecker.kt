@@ -403,10 +403,16 @@ object AppUpdateChecker {
         }
     }
 
-    /** Numeric, dot-separated comparison — "1.10" outranks "1.9". */
+    /**
+     * Numeric, dot-separated comparison — "1.10" outranks "1.9".
+     *
+     * Anything after a "-" is dropped before comparing: the dev flavour names
+     * itself "1.0.8-dev", and read as-is its last part is not a number, so the
+     * build compared as 1.0.0 and was offered every release as an update.
+     */
     private fun isNewer(latest: String, current: String): Boolean {
-        val l = latest.split(".").map { it.toIntOrNull() ?: 0 }
-        val c = current.split(".").map { it.toIntOrNull() ?: 0 }
+        val l = latest.substringBefore('-').split(".").map { it.toIntOrNull() ?: 0 }
+        val c = current.substringBefore('-').split(".").map { it.toIntOrNull() ?: 0 }
         for (i in 0 until maxOf(l.size, c.size)) {
             val a = l.getOrElse(i) { 0 }
             val b = c.getOrElse(i) { 0 }

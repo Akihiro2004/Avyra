@@ -1,39 +1,28 @@
 package com.avyra.music.data
 
-import android.util.Log
-import com.avyra.music.BuildConfig
-
 /**
- * `android.util.Log`, minus the release build.
+ * Debug logging for code both applications run.
  *
- * For call sites outside the playback/resolve path that [TrackLog] covers —
- * feeds, artwork, library scans, scrobbling — where there's no Copy Log
- * reader depending on the output, so there's nothing to preserve in prod.
- * Import as `import com.avyra.music.data.DebugLog as Log` to drop in
- * without touching call sites.
+ * Silent until an application installs a [sink]: the phone routes it to
+ * logcat on debug builds only, the desktop to its track log.
  */
 object DebugLog {
-    fun d(tag: String, message: String) {
-        if (BuildConfig.DEBUG) Log.d(tag, message)
+    fun interface Sink {
+        fun log(level: Char, tag: String, message: String, error: Throwable?)
     }
 
-    fun i(tag: String, message: String) {
-        if (BuildConfig.DEBUG) Log.i(tag, message)
-    }
+    @Volatile
+    var sink: Sink? = null
 
-    fun w(tag: String, message: String) {
-        if (BuildConfig.DEBUG) Log.w(tag, message)
-    }
+    fun d(tag: String, message: String) = sink?.log('D', tag, message, null) ?: Unit
 
-    fun w(tag: String, message: String, error: Throwable) {
-        if (BuildConfig.DEBUG) Log.w(tag, message, error)
-    }
+    fun i(tag: String, message: String) = sink?.log('I', tag, message, null) ?: Unit
 
-    fun e(tag: String, message: String) {
-        if (BuildConfig.DEBUG) Log.e(tag, message)
-    }
+    fun w(tag: String, message: String) = sink?.log('W', tag, message, null) ?: Unit
 
-    fun e(tag: String, message: String, error: Throwable) {
-        if (BuildConfig.DEBUG) Log.e(tag, message, error)
-    }
+    fun w(tag: String, message: String, error: Throwable) = sink?.log('W', tag, message, error) ?: Unit
+
+    fun e(tag: String, message: String) = sink?.log('E', tag, message, null) ?: Unit
+
+    fun e(tag: String, message: String, error: Throwable) = sink?.log('E', tag, message, error) ?: Unit
 }

@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="analysis_complete">przeanalizowano</string>
+    <string name="analysis_in_progress">analizowanie…</string>
+    <string name="analysis_refining">przeanalizowano, ulepszanie…</string>
+    <string name="audio_output">Audio output</string>
+    <string name="audio_output_playing">Playing here</string>
+    <string name="automix_analysis_status">Automix · ten utwór: %1$s · następny: %2$s</string>
+    <string name="automix_not_supported_video">Automix nie jest obsługiwany dla utworów wideo</string>
+    <string name="autoplay">Autoodtwarzanie</string>
+    <string name="autoplay_empty_description">Podobna muzyka będzie nadal odtwarzana</string>
+    <string name="autoplay_off">Autoodtwarzanie wyłączone</string>
+    <string name="autoplay_on">Autoodtwarzanie włączone</string>
+    <string name="autoplay_queue_description">Podobna muzyka, wybrana do odtworzenia w następnej kolejności</string>
+    <string name="bit_depth">%1$d-bit</string>
+    <string name="change_lyrics_provider">Zmień</string>
+    <string name="channel_count">%1$d kan</string>
+    <string name="choose_lyrics_provider">Wybierz źródło tekstów</string>
+    <string name="close_lyrics">Zamknij teksty</string>
+    <string name="data_saver">Data-Saver</string>
+    <string name="decrease_lyrics_offset">Decrease lyrics offset</string>
+    <string name="downgraded_from">↓ z %1$s</string>
+    <string name="hi_res_lossless">Hi-Res Lossless</string>
+    <string name="high_quality">Wysoka jakość</string>
+    <string name="high_quality_upgrading">Wysoka jakość, uaktualnianie</string>
+    <string name="increase_lyrics_offset">Increase lyrics offset</string>
+    <string name="instrumental">Instrumentalny</string>
+    <string name="mixing">Miksowanie</string>
+    <string name="lyrics_already_in_language">Ten tekst jest już w języku %1$s</string>
+    <string name="lyrics_already_romanized">Ten tekst jest już zapisany alfabetem łacińskim</string>
+    <string name="lyrics_by">Tekst przez %1$s</string>
+    <string-array name="lyrics_intro_lines">
+        <item>Nadchodzi beat</item>
+        <item>Piosenka się zaczyna</item>
+        <item>Rozgrzewka</item>
+        <item>Tworzenie nastroju</item>
+        <item>Najpierw bas, potem słowa</item>
+        <item>Poczekaj na to</item>
+        <item>Poczuj to narastanie</item>
+        <item>Tylko groove na razie</item>
+        <item>Refren jest w drodze</item>
+        <item>Daj mu oddychać</item>
+        <item>Przygotuj wokale</item>
+        <item>Pierwsze nuty</item>
+    </string-array>
+    <string-array name="lyrics_loading_lines">
+        <item>Pobieranie tekstów</item>
+        <item>Szukanie słów</item>
+        <item>Pobieranie zwrotek</item>
+        <item>Ładowanie tekstów</item>
+        <item>Sprawdzanie kartki z tekstami</item>
+        <item>Przeszukiwanie śpiewnika</item>
+        <item>Układanie tekstów</item>
+        <item>Słowa są w drodze</item>
+        <item>Sprawdzanie archiwów</item>
+        <item>Szukanie odpowiednich słów</item>
+        <item>Teksty się łączą</item>
+        <item>Prawie znaleziono słowa</item>
+    </string-array>
+    <string name="lyrics_not_available">Tekst niedostępny</string>
+    <string name="lyrics_offset_description">Positive values show lyrics later</string>
+    <string name="lyrics_offset_reset">Reset</string>
+    <string name="lyrics_provider_current">Aktualne źródło</string>
+    <string name="lyrics_provider_fetching">Pobieranie tekstu…</string>
+    <string name="lyrics_provider_found">Tekst znaleziony · Dotknij, aby użyć</string>
+    <string name="lyrics_provider_not_fetched">Dotknij, aby pobrać</string>
+    <string name="lyrics_provider_not_found">Nie znaleziono tekstu</string>
+    <string name="lyrics_romanization_unavailable">Latynizacja jest niedostępna dla tego tekstu</string>
+    <string name="lyrics_romanized">Wymowa w alfabecie łacińskim</string>
+    <string name="lyrics_saved_with_download">Teksty zapisane wraz z tym pobieraniem</string>
+    <string name="lyrics_translated_to">Przetłumaczono na %1$s</string>
+    <string name="lyrics_translation_unavailable">Tłumaczenie jest teraz niedostępne</string>
+    <string name="medium_quality">Medium Quality</string>
+    <string name="next_from">Następne z: %1$s</string>
+    <string name="next_in_queue">Następny w kolejce</string>
+    <string name="no_lyrics_for_track">Brak tekstów do tego utworu</string>
+    <string name="no_lyrics_found">Nie znaleziono tekstu</string>
+    <string name="open_lyrics">Lyrics</string>
+    <string name="playing_from">Playing from %1$s</string>
+    <string name="playing_radio">Odtwarzanie radia %1$s</string>
+    <string name="remove_from_queue">Usuń z kolejki</string>
+    <string name="repeat_all">Powtórz wszystkie</string>
+    <string name="repeat_off">Powtarzanie wyłączone</string>
+    <string name="repeat_one">Powtórz jeden</string>
+    <string name="romanize_lyrics">Latynizuj tekst</string>
+    <string name="romanizing_lyrics">Latynizowanie tekstu…</string>
+    <string name="show_original_lyrics">Pokaż oryginalny tekst</string>
+    <string name="translate_lyrics">Przetłumacz tekst</string>
+    <string name="translating_lyrics_to">Tłumaczenie na %1$s…</string>
+    <string name="up_next">Następne</string>
+    <string name="upgrading_quality">Uaktualnianie jakości</string>
+    <string name="waiting">oczekiwanie</string>
+    <string name="wired_headphones">Wired headphones</string>
+    <string name="usb_audio">USB audio</string>
+    <string name="hdmi_output">HDMI</string>
+    <string name="personal_phone">%1$s’s Phone</string>
+    <string name="this_phone">This phone</string>
+</resources>

@@ -1,10 +1,11 @@
 package com.avyra.music.playback.smart
 
-import android.content.Context
-import android.util.Log
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.io.File
+import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -41,7 +42,18 @@ import java.util.concurrent.ConcurrentHashMap
  * milliseconds: they are the bulk of the payload and nothing downstream can
  * tell the difference.
  */
-class AnalysisStore(private val context: Context) {
+class AnalysisStore(
+    /**
+     * Where analyses are kept, resolved lazily.
+     *
+     * A directory rather than a platform handle: on Android this used to be a
+     * [android.content.Context], resolved late because the playback service
+     * builds its analyzer before it has a base context. The desktop has no such
+     * problem and no such type, so both now pass a directory and the laziness
+     * stays where it was.
+     */
+    private val directoryOf: () -> java.io.File,
+) {
 
     /**
      * Resolved on first use, not at construction. [TrackAnalyzer] is a field
@@ -49,7 +61,7 @@ class AnalysisStore(private val context: Context) {
      * base context attached — asking for [Context.getFilesDir] there returns
      * null and takes the whole process down before it can start.
      */
-    private val directory by lazy { File(context.filesDir, DIRECTORY) }
+    private val directory by lazy { File(directoryOf(), DIRECTORY) }
 
     /**
      * Track ids known to have no file, so a track analysed in neither this
@@ -84,7 +96,7 @@ class AnalysisStore(private val context: Context) {
                 // A half-written or outdated file is worth exactly nothing and
                 // costs a re-analysis to replace, so it goes rather than being
                 // returned as a partly-filled result.
-                Log.w(TAG, "Discarding unreadable analysis for $trackId", it)
+                AnalysisLog.warn("Discarding unreadable analysis for $trackId", it)
                 file.delete()
                 known[trackId] = false
             }
@@ -101,14 +113,38 @@ class AnalysisStore(private val context: Context) {
         runCatching {
             directory.mkdirs()
             val file = File(directory, fileNameFor(trackId))
-            // Written aside and renamed, so a kill mid-write leaves the old
-            // entry rather than a truncated one.
+            // Written aside and moved into place, so a kill mid-write leaves the old entry
+            // rather than a truncated one.
             val temporary = File(directory, file.name + ".tmp")
-            temporary.writeText(json.encodeToString(Stored.serializer(), Stored.of(analysis)))
-            if (!temporary.renameTo(file)) temporary.delete()
+            try {
+                temporary.writeText(json.encodeToString(Stored.serializer(), Stored.of(analysis)))
+                moveInto(temporary, file)
+            } finally {
+                // A no-op once the move has taken it.
+                temporary.delete()
+            }
             known[trackId] = true
-        }.onFailure { Log.w(TAG, "Could not store analysis for $trackId", it) }
+        }.onFailure { AnalysisLog.warn("Could not store analysis for $trackId", it) }
         prune()
+    }
+
+    /**
+     * Atomic where the filesystem allows it, replacing where it does not.
+     *
+     * Not `File.renameTo`: on Windows that fails outright when the destination exists, so
+     * re-analysing a track would quietly leave the old entry in place.
+     */
+    private fun moveInto(temporary: File, file: File) {
+        try {
+            Files.move(
+                temporary.toPath(),
+                file.toPath(),
+                StandardCopyOption.ATOMIC_MOVE,
+                StandardCopyOption.REPLACE_EXISTING,
+            )
+        } catch (_: AtomicMoveNotSupportedException) {
+            Files.move(temporary.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING)
+        }
     }
 
     /**
@@ -237,7 +273,6 @@ class AnalysisStore(private val context: Context) {
     }
 
     private companion object {
-        const val TAG = "AvyraAnalysisStore"
         const val DIRECTORY = "smart_analysis"
 
         /**

@@ -1,6 +1,5 @@
 package com.my.kizzy.gateway
 
-import android.os.SystemClock
 import com.my.kizzy.gateway.entities.Heartbeat
 import com.my.kizzy.gateway.entities.Identify.Companion.toIdentifyPayload
 import com.my.kizzy.gateway.entities.Payload
@@ -309,7 +308,7 @@ open class DiscordWebSocket(
             HEARTBEAT -> sendHeartBeat()
             HEARTBEAT_ACK -> {
                 awaitingAck = false
-                lastAckAt = SystemClock.elapsedRealtime()
+                lastAckAt = elapsedRealtimeMs()
             }
             RECONNECT -> reconnectWebSocket()
             INVALID_SESSION -> handleInvalidSession()
@@ -350,7 +349,7 @@ open class DiscordWebSocket(
      * queue moved on.
      */
     private fun onSessionReady() {
-        lastAckAt = SystemClock.elapsedRealtime()
+        lastAckAt = elapsedRealtimeMs()
         sessionReady.value = true
         val presence = lastPresence ?: return
         launch {
@@ -432,7 +431,7 @@ open class DiscordWebSocket(
     private fun startHeartbeatJob(interval: Long) {
         heartbeatJob?.cancel()
         awaitingAck = false
-        lastAckAt = SystemClock.elapsedRealtime()
+        lastAckAt = elapsedRealtimeMs()
         heartbeatJob = launch {
             while (isActive) {
                 if (awaitingAck) {
@@ -460,7 +459,7 @@ open class DiscordWebSocket(
     private fun isStale(): Boolean {
         val interval = heartbeatInterval
         if (interval <= 0L || lastAckAt == 0L) return false
-        val sinceAckMs = SystemClock.elapsedRealtime() - lastAckAt
+        val sinceAckMs = elapsedRealtimeMs() - lastAckAt
         return sinceAckMs > interval + STALE_GRACE.inWholeMilliseconds
     }
 
@@ -590,3 +589,20 @@ open class DiscordWebSocket(
         private val CLOSE_TIMEOUT = 2.seconds
     }
 }
+
+/**
+ * Milliseconds since boot, counting time the device spent asleep.
+ *
+ * `System.nanoTime` is not that on Android — it can stop during deep sleep,
+ * which is exactly when this reading matters: the point of it is to notice that
+ * a lot of wall time has passed with nothing heard from Discord. So Android's
+ * own clock is used where there is one, found reflectively because this module
+ * is shared with the desktop and cannot import it.
+ */
+private val androidElapsedRealtime: java.lang.reflect.Method? = runCatching {
+    Class.forName("android.os.SystemClock").getMethod("elapsedRealtime")
+}.getOrNull()
+
+internal fun elapsedRealtimeMs(): Long =
+    androidElapsedRealtime?.let { runCatching { it.invoke(null) as Long }.getOrNull() }
+        ?: (System.nanoTime() / 1_000_000L)

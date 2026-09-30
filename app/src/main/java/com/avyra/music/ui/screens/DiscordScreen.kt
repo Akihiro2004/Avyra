@@ -23,6 +23,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Label
+import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.RadioButtonChecked
 import androidx.compose.material.icons.rounded.SmartButton
@@ -46,6 +47,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.vectorResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -54,8 +56,10 @@ import androidx.core.net.toUri
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import com.avyra.music.R
+import com.avyra.music.data.NerdStats
 import com.avyra.music.data.discord.DiscordRPC
 import com.avyra.music.data.discord.SuperProperties
+import com.avyra.music.data.discord.discordAudioQualityLine
 import com.avyra.music.data.model.CARD_ART_PX
 import com.avyra.music.data.model.Song
 import com.avyra.music.data.model.artworkAt
@@ -103,6 +107,47 @@ private fun statusOf(value: String) =
 private fun kindOf(value: String) =
     DiscordActivityKind.entries.firstOrNull { it.value == value } ?: DiscordActivityKind.LISTENING
 
+@Composable
+private fun localizedStatusCopy(): Map<DiscordPresenceStatus, Pair<String, String>> = mapOf(
+    DiscordPresenceStatus.ONLINE to (
+        stringResource(R.string.status_online) to stringResource(R.string.status_online_detail)
+        ),
+    DiscordPresenceStatus.IDLE to (
+        stringResource(R.string.status_idle) to stringResource(R.string.status_idle_detail)
+        ),
+    DiscordPresenceStatus.DND to (
+        stringResource(R.string.status_dnd) to stringResource(R.string.status_dnd_detail)
+        ),
+)
+
+@Composable
+private fun localizedActivityCopy(): Map<DiscordActivityKind, Pair<String, String>> = mapOf(
+    DiscordActivityKind.LISTENING to (
+        stringResource(R.string.activity_listening) to stringResource(R.string.verb_listening)
+        ),
+    DiscordActivityKind.PLAYING to (
+        stringResource(R.string.activity_playing) to stringResource(R.string.verb_playing)
+        ),
+    DiscordActivityKind.WATCHING to (
+        stringResource(R.string.activity_watching) to stringResource(R.string.verb_watching)
+        ),
+    DiscordActivityKind.COMPETING to (
+        stringResource(R.string.activity_competing) to stringResource(R.string.verb_competing)
+        ),
+)
+
+@Composable
+private fun DiscordPresenceStatus.localizedLabel(): String =
+    localizedStatusCopy().getValue(this).first
+
+@Composable
+private fun DiscordActivityKind.localizedLabel(): String =
+    localizedActivityCopy().getValue(this).first
+
+@Composable
+private fun DiscordActivityKind.localizedVerb(): String =
+    localizedActivityCopy().getValue(this).second
+
 /**
  * Discord Rich Presence: the account it posts as, what the card says, and a
  * live preview of it.
@@ -127,6 +172,7 @@ fun DiscordScreen(
     val avatar by AppSettings.discordAvatar.collectAsStateWithLifecycle()
     val rpcEnabled by AppSettings.discordRpcEnabled.collectAsStateWithLifecycle()
     val useDetails by AppSettings.discordUseDetails.collectAsStateWithLifecycle()
+    val showAudioQuality by AppSettings.discordShowAudioQuality.collectAsStateWithLifecycle()
     val advancedMode by AppSettings.discordAdvancedMode.collectAsStateWithLifecycle()
     val status by AppSettings.discordStatus.collectAsStateWithLifecycle()
     val activityType by AppSettings.discordActivityType.collectAsStateWithLifecycle()
@@ -134,6 +180,7 @@ fun DiscordScreen(
     val button1Text by AppSettings.discordButton1Text.collectAsStateWithLifecycle()
     val button1Visible by AppSettings.discordButton1Visible.collectAsStateWithLifecycle()
     val infoDismissed by AppSettings.discordInfoDismissed.collectAsStateWithLifecycle()
+    val nerdStats by NerdStats.current.collectAsStateWithLifecycle()
 
     val connected = token.isNotEmpty()
     val rpcConfigured = DiscordRPC.isConfigured
@@ -171,7 +218,7 @@ fun DiscordScreen(
             .padding(contentPadding),
     ) {
         Text(
-            text = "Discord",
+            text = stringResource(R.string.discord),
             style = MaterialTheme.typography.displayLarge,
             color = MaterialTheme.colorScheme.onBackground,
             modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 14.dp),
@@ -189,12 +236,12 @@ fun DiscordScreen(
 
         if (!connected) {
             SettingsGroup(
-                footer = "Signing in opens Discord's own login page. Nothing is typed into this app.",
+                footer = stringResource(R.string.discord_sign_in_footer),
             ) {
                 SettingsRow(
                     icon = Icons.Rounded.Key,
-                    title = "Enter a token instead",
-                    subtitle = "For when the login page won't load",
+                    title = stringResource(R.string.enter_token_instead),
+                    subtitle = stringResource(R.string.enter_token_instead_subtitle),
                     onClick = { onOpenDialog(DiscordDialog.TOKEN) },
                 )
             }
@@ -202,20 +249,14 @@ fun DiscordScreen(
 
         AnimatedVisibility(visible = !infoDismissed) {
             NoticeCard(
-                text = "Discord has no API for an app to set your presence, so this " +
-                    "signs in as your account and speaks its protocol. Your token is " +
-                    "stored encrypted on this device and only ever sent to Discord — " +
-                    "but it is your whole account, and automating one is against " +
-                    "Discord's terms of service. Bans for presence alone aren't a " +
-                    "thing anyone reports; it's still your call.",
+                text = stringResource(R.string.discord_token_warning),
                 onDismiss = { AppSettings.setDiscordInfoDismissed(true) },
             )
         }
 
         SettingsGroup(
-            header = "Rich presence",
-            footer = "The card updates on every track change, seek, and pause — and " +
-                "clears itself when playback stops.",
+            header = stringResource(R.string.rich_presence),
+            footer = stringResource(R.string.discord_presence_footer),
         ) {
             SettingsRow(
                 icon = discordIcon,
@@ -241,8 +282,8 @@ fun DiscordScreen(
             RowDivider()
             SettingsRow(
                 icon = Icons.AutoMirrored.Rounded.Label,
-                title = "Lead with the song",
-                subtitle = "Puts the title on the bold line, in place of the artist",
+                title = stringResource(R.string.lead_with_song),
+                subtitle = stringResource(R.string.lead_with_song_subtitle),
                 enabled = connected && rpcEnabled,
                 trailing = {
                     Switch(
@@ -253,6 +294,25 @@ fun DiscordScreen(
                     )
                 },
                 onClick = { AppSettings.setDiscordUseDetails(!useDetails) },
+            )
+            RowDivider()
+            SettingsRow(
+                icon = Icons.Rounded.GraphicEq,
+                title = stringResource(R.string.discord_show_audio_quality),
+                subtitle = stringResource(R.string.discord_show_audio_quality_subtitle),
+                enabled = connected && rpcEnabled,
+                trailing = {
+                    Switch(
+                        checked = showAudioQuality,
+                        onCheckedChange = AppSettings::setDiscordShowAudioQuality,
+                        enabled = connected && rpcEnabled,
+                        colors = SwitchDefaults.colors(
+                            checkedTrackColor = MaterialTheme.colorScheme.primary,
+                            checkedBorderColor = MaterialTheme.colorScheme.primary,
+                        ),
+                    )
+                },
+                onClick = { AppSettings.setDiscordShowAudioQuality(!showAudioQuality) },
             )
             RowDivider()
             SettingsRow(
@@ -274,24 +334,24 @@ fun DiscordScreen(
 
         AnimatedVisibility(visible = connected && rpcEnabled && rpcConfigured && advancedMode) {
             Column(Modifier.fillMaxWidth()) {
-                SettingsGroup(header = "Presence") {
+                SettingsGroup(header = stringResource(R.string.presence)) {
                     SettingsRow(
                         icon = Icons.Rounded.RadioButtonChecked,
-                        title = "Status",
-                        value = statusOf(status).label,
+                        title = stringResource(R.string.status),
+                        value = statusOf(status).localizedLabel(),
                         onClick = { onOpenDialog(DiscordDialog.STATUS) },
                     )
                     RowDivider()
                     SettingsRow(
                         icon = Icons.Rounded.Tune,
-                        title = "Activity",
-                        value = kindOf(activityType).label,
+                        title = stringResource(R.string.activity),
+                        value = kindOf(activityType).localizedLabel(),
                         onClick = { onOpenDialog(DiscordDialog.ACTIVITY_TYPE) },
                     )
                     RowDivider()
                     SettingsRow(
                         icon = Icons.AutoMirrored.Rounded.Label,
-                        title = "Name",
+                        title = stringResource(R.string.name),
                         subtitle = activityName.ifEmpty { appName() },
                         onClick = { onOpenDialog(DiscordDialog.ACTIVITY_NAME) },
                     )
@@ -320,16 +380,17 @@ fun DiscordScreen(
         }
 
         SettingsGroup(
-            header = "Preview",
-            footer = if (song == null) "Play something to see it filled in." else null,
+            header = stringResource(R.string.preview),
+            footer = if (song == null) stringResource(R.string.play_to_preview) else null,
         ) {
             RichPresencePreview(
                 song = song,
                 positionMs = positionMs,
                 durationMs = durationMs,
                 heading = activityName.ifEmpty { appName() },
-                verb = kindOf(activityType).verb,
+                verb = kindOf(activityType).localizedVerb(),
                 useDetails = useDetails,
+                audioQuality = discordAudioQualityLine(nerdStats).takeIf { showAudioQuality },
                 button1Text = button1Text,
                 button1Visible = button1Visible,
             )
@@ -338,7 +399,7 @@ fun DiscordScreen(
         if (connected) {
             SettingsGroup {
                 DestructiveRow(
-                    label = "Disconnect",
+                    label = stringResource(R.string.disconnect),
                     onClick = { AppSettings.clearDiscordAccount() },
                 )
             }
@@ -417,7 +478,8 @@ private fun DiscordAccountCard(
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             Text(
-                text = if (connected) name.ifEmpty { "Connected" } else "Not connected",
+                text = if (connected) name.ifEmpty { stringResource(R.string.connected) }
+                else stringResource(R.string.not_connected),
                 style = MaterialTheme.typography.titleLarge,
                 color = MaterialTheme.colorScheme.onBackground,
                 maxLines = 1,
@@ -427,8 +489,8 @@ private fun DiscordAccountCard(
             Text(
                 text = when {
                     username.isNotEmpty() -> "@$username"
-                    connected -> "Discord account"
-                    else -> "Tap to sign in with Discord"
+                    connected -> stringResource(R.string.discord_account)
+                    else -> stringResource(R.string.tap_to_sign_in_discord)
                 },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -466,7 +528,7 @@ private fun NoticeCard(text: String, onDismiss: () -> Unit) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
-                text = "Got it",
+                text = stringResource(R.string.got_it),
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier
@@ -495,12 +557,13 @@ private fun RichPresencePreview(
     heading: String,
     verb: String,
     useDetails: Boolean,
+    audioQuality: String?,
     button1Text: String,
     button1Visible: Boolean,
 ) {
     val context = LocalContext.current
-    val title = song?.title ?: "Song title"
-    val artist = song?.artist ?: "Artist"
+    val title = song?.title ?: stringResource(R.string.widget_preview_title)
+    val artist = song?.artist ?: stringResource(R.string.widget_preview_artist)
 
     Column(Modifier.fillMaxWidth().padding(16.dp)) {
         Text(
@@ -550,7 +613,7 @@ private fun RichPresencePreview(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                song?.albumName?.takeIf { it.isNotBlank() }?.let {
+                audioQuality?.let {
                     Text(
                         text = it,
                         style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
@@ -670,6 +733,7 @@ fun DiscordDialogHost(
     hazeState: HazeState,
     onDismiss: () -> Unit,
 ) {
+    val rejectedToken = stringResource(R.string.discord_token_rejected)
     when (which) {
         DiscordDialog.TOKEN -> {
             val scope = rememberCoroutineScope()
@@ -702,7 +766,7 @@ fun DiscordDialogHost(
                             AppSettings.setDiscordToken(trimmed)
                             onDismiss()
                         }.onFailure {
-                            error = "Discord rejected that token."
+                            error = rejectedToken
                             checking = false
                         }
                     }
@@ -713,14 +777,15 @@ fun DiscordDialogHost(
 
         DiscordDialog.STATUS -> {
             val current by AppSettings.discordStatus.collectAsStateWithLifecycle()
+            val copy = localizedStatusCopy()
             ChoiceAlert(
                 hazeState = hazeState,
-                title = "Status",
-                message = "What your account shows while a presence is up.",
+                title = stringResource(R.string.status),
+                message = stringResource(R.string.status_dialog_message),
                 options = DiscordPresenceStatus.entries,
                 selected = statusOf(current),
-                label = { it.label },
-                detail = { it.detail },
+                label = { copy.getValue(it).first },
+                detail = { copy.getValue(it).second },
                 onSelect = {
                     AppSettings.setDiscordStatus(it.value)
                     onDismiss()
@@ -735,14 +800,15 @@ fun DiscordDialogHost(
             // Read out here: `detail` is a plain lambda, so the composable
             // lookup can't happen inside it.
             val name = currentName.ifEmpty { appName() }
+            val copy = localizedActivityCopy()
             ChoiceAlert(
                 hazeState = hazeState,
-                title = "Activity",
-                message = "The verb above the card.",
+                title = stringResource(R.string.activity),
+                message = stringResource(R.string.activity_dialog_message),
                 options = DiscordActivityKind.entries,
                 selected = kindOf(current),
-                label = { it.label },
-                detail = { "\"${it.verb} $name\"" },
+                label = { copy.getValue(it).first },
+                detail = { "\"${copy.getValue(it).second} $name\"" },
                 onSelect = {
                     AppSettings.setDiscordActivityType(it.value)
                     onDismiss()
@@ -756,9 +822,8 @@ fun DiscordDialogHost(
             var input by remember { mutableStateOf(current) }
             TextValueAlert(
                 hazeState = hazeState,
-                title = "Name",
-                message = "What follows the verb on the profile. Leave it empty for " +
-                    "${appName()}.",
+                title = stringResource(R.string.name),
+                message = stringResource(R.string.activity_name_message, appName()),
                 placeholder = appName(),
                 value = input,
                 onValueChange = { input = it },

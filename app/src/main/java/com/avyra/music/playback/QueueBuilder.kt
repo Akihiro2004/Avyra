@@ -6,6 +6,10 @@ import java.util.Locale
 /**
  * Builds the station that plays on after a one-off song.
  *
+ * Shared: Android and the desktop assemble the same station from the same
+ * watch queue, so the de-duplication and the per-artist caps are one
+ * implementation rather than two that drift.
+ *
  * Two problems this exists to solve:
  *
  *  - YouTube's watch queues routinely carry the same recording twice — the
@@ -21,10 +25,10 @@ import java.util.Locale
 object QueueBuilder {
 
     /** No more than this many tracks by one artist in a single batch. */
-    private const val PER_ARTIST_LIMIT = 2
+    const val PER_ARTIST_LIMIT = 2
 
     /** The artist the station was seeded on gets more room, but not the run of it. */
-    private const val SEED_ARTIST_LIMIT = 4
+    const val SEED_ARTIST_LIMIT = 4
 
     /**
      * The subset of [candidates] worth appending after [existing]: nothing
@@ -88,7 +92,7 @@ object QueueBuilder {
      * recording as far as a queue is concerned. Remix and cover markers are
      * deliberately left in — those really are different tracks.
      */
-    internal fun normalisedTitle(raw: String): String = raw.lowercase(Locale.ROOT)
+    fun normalisedTitle(raw: String): String = raw.lowercase(Locale.ROOT)
         .substringBefore(" | ")
         .replace(NOISE, " ")
         .replace(PUNCTUATION, " ")
@@ -96,7 +100,7 @@ object QueueBuilder {
         .trim()
 
     /** The cast behind a credit, split out so billing order stops mattering. */
-    internal fun artistSet(raw: String): Set<String> = raw.lowercase(Locale.ROOT)
+    fun artistSet(raw: String): Set<String> = raw.lowercase(Locale.ROOT)
         .replace(TOPIC, " ")
         .split(",", "&", "·", "•", ";", " feat", " ft.", " ft ", " x ", " with ")
         .map { it.replace(PUNCTUATION, " ").replace(SPACES, " ").trim() }

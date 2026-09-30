@@ -1,6 +1,6 @@
 package com.avyra.music.ui.player
 
-import android.graphics.Bitmap
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationSpec
@@ -26,18 +26,17 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.platform.LocalContext
+import coil3.compose.LocalPlatformContext
+import com.avyra.music.ui.graphics.forPixelAccess
+import com.avyra.music.ui.graphics.paletteSwatches
+import com.avyra.music.ui.graphics.toImageBitmap
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.core.graphics.ColorUtils
+import com.avyra.music.ui.graphics.ColorUtils
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.palette.graphics.Palette
 import coil3.SingletonImageLoader
 import coil3.request.ImageRequest
 import coil3.request.SuccessResult
-import coil3.request.allowHardware
-import coil3.toBitmap
-import com.avyra.music.data.settings.AppSettings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
@@ -105,7 +104,7 @@ fun MeshGradientBackground(
      */
     animated: Boolean = true,
 ) {
-    val reduceAnimation by AppSettings.reduceAnimation.collectAsStateWithLifecycle()
+    val reduceAnimation by PlayerSettings.reduceAnimation.collectAsStateWithLifecycle()
 
     val tuned = (palette.colors.ifEmpty { FallbackColors } + FallbackColors)
         .take(4)
@@ -216,8 +215,8 @@ fun MeshGradientBackground(
  * takes over from there, crossfading in exactly like a track skip.
  */
 @Composable
-fun rememberArtworkColors(imageUrl: String?, canvasFrame: Bitmap? = null): MeshPalette {
-    val context = LocalContext.current
+fun rememberArtworkColors(imageUrl: String?, canvasFrame: ImageBitmap? = null): MeshPalette {
+    val context = LocalPlatformContext.current
     var palette by remember(imageUrl) { mutableStateOf(MeshPalette(FallbackColors)) }
 
     LaunchedEffect(imageUrl) {
@@ -225,15 +224,19 @@ fun rememberArtworkColors(imageUrl: String?, canvasFrame: Bitmap? = null): MeshP
         val request = ImageRequest.Builder(context)
             .data(imageUrl)
             .size(128) // palette quality is fine at thumbnail size, and it's fast
-            .allowHardware(false) // Palette needs pixel access
+            .forPixelAccess() // Palette needs pixel access
             .build()
         val result = SingletonImageLoader.get(context).execute(request)
-        val bitmap = (result as? SuccessResult)?.image?.toBitmap() ?: return@LaunchedEffect
+        val bitmap = (result as? SuccessResult)?.image?.toImageBitmap() ?: return@LaunchedEffect
         palette = MeshPalette(paletteOf(bitmap))
     }
 
     LaunchedEffect(canvasFrame) {
         val frame = canvasFrame ?: return@LaunchedEffect
+        // Reject near-black frames (first read after surface recreation, before
+        // ExoPlayer decodes real content).  A dark sleeve will still exceed the
+        // threshold because compression noise pushes mean luminance above ~12.
+        if (isLikelyBlackFrame(frame)) return@LaunchedEffect
         val colors = withContext(Dispatchers.Default) { paletteOf(frame) }
         palette = MeshPalette(colors)
     }
@@ -257,16 +260,16 @@ private const val DRIFT_RADIANS = (PI * 0.45f).toFloat()
  * purple. So the whole swatch list is read instead, and any shortfall is
  * derived from the art's own colours rather than borrowed.
  */
-private fun paletteOf(bitmap: Bitmap): List<Color> {
-    fun swatchesOf(builder: Palette.Builder): List<Color> =
-        builder.maximumColorCount(24).generate().swatches
+private fun paletteOf(bitmap: ImageBitmap): List<Color> {
+    fun swatchesOf(clearFilters: Boolean): List<Color> =
+        paletteSwatches(bitmap, 24, clearFilters)
             .sortedByDescending { it.population }
             .map { Color(it.rgb) }
 
-    val found = swatchesOf(Palette.from(bitmap)).ifEmpty {
+    val found = swatchesOf(clearFilters = false).ifEmpty {
         // The default filter discards near-black and near-white, which on a
         // monochrome sleeve can be everything there is.
-        swatchesOf(Palette.from(bitmap).clearFilters())
+        swatchesOf(clearFilters = true)
     }
 
     val distinct = found.distinctEnough()

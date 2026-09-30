@@ -200,7 +200,7 @@ fun AvyraTheme(
 fun SystemBarIcons(dark: Boolean) {
     val view = LocalView.current
     if (view.isInEditMode) return
-    val window = (view.context as? Activity)?.window ?: return
+    val window = findWindow(view) ?: return
     SideEffect {
         WindowCompat.getInsetsController(window, view).apply {
             isAppearanceLightStatusBars = dark
@@ -208,3 +208,4 @@ fun SystemBarIcons(dark: Boolean) {
         }
     }
 }
+

@@ -19,41 +19,25 @@ import androidx.core.os.bundleOf
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
+import androidx.media3.common.Timeline
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionToken
 import com.avyra.music.data.model.NOTIFICATION_ART_PX
+import com.avyra.music.data.model.PlaybackSourceType
+import com.avyra.music.data.model.QueueTier
 import com.avyra.music.data.model.Song
 import com.avyra.music.data.model.artworkAt
 import com.avyra.music.data.sources.SourceRegistry
 import com.avyra.music.data.sources.TrackMatcher
 import com.avyra.music.download.Downloads
 import com.avyra.music.ui.rememberIsForeground
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.guava.await
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.Locale
-
-/**
- * The playhead, deliberately kept out of [PlayerState].
- *
- * It moves twice a second; everything else on [PlayerState] moves on a track
- * change. Carried in the same object, the two are one snapshot read — and
- * [rememberPlayerState] returns a value, which makes it non-restartable, which
- * pushes that read up into its *caller's* scope. In this app the caller is the
- * root of the whole UI, so a ticking playhead invalidated the entire tree twice
- * a second: every tab, both floating bars, and the three real-time blurs
- * underneath them, whether or not anything on screen showed a position.
- *
- * Split out and held behind a stable object, the tick is a read of this alone.
- * Whoever draws a scrubber reads it and recomposes; nobody else hears about it.
- * Take care to keep it that way — reading [positionMs] high in the tree and
- * passing the `Long` down puts the invalidation straight back where it was.
- */
-@Stable
-class PlaybackPosition internal constructor() {
-    var positionMs by mutableLongStateOf(0L)
-        internal set
-}
 
 /** Snapshot of playback state, driven by the MediaController. */
 data class PlayerState(
@@ -83,6 +67,8 @@ data class PlayerState(
      */
     val hasPrevious: Boolean = false,
     val hasNext: Boolean = false,
+    /** True while the current item is the replacement installed by a quality upgrade. */
+    val isQualityUpgraded: Boolean = false,
 )
 
 /** Binds to [PlaybackService] for the lifetime of the composition. */
@@ -115,6 +101,121 @@ fun MediaController.toggleAutoplay() {
     )
 }
 
+/**
+ * Routes Shuffle through the playback service so changing its state and
+ * reordering the service-owned queue happen as one operation.
+ */
+fun MediaController.toggleShuffle() {
+    sendCustomCommand(
+        SessionCommand(ACTION_TOGGLE_SHUFFLE, Bundle.EMPTY),
+        Bundle.EMPTY,
+    )
+}
+
+/** Clears the previous queue's service and restart state before starting radio. */
+suspend fun MediaController.beginRadioQueue() {
+    sendCustomCommand(
+        SessionCommand(ACTION_BEGIN_RADIO_QUEUE, Bundle.EMPTY),
+        Bundle.EMPTY,
+    ).await()
+}
+
+/**
+ * Asks the service to go looking for a better copy of the playing track, now,
+ * because the listener asked for it.
+ *
+ * A session command rather than a `replaceMediaItem` from here: the item has to
+ * be rebuilt, the track's cached rendition has to be dropped and the automatic
+ * path's verdicts about it have to be cleared, and all three live on the
+ * service's side of the session — see [PlaybackService]'s `upgradeQualityNow`.
+ */
+fun MediaController.upgradeQuality() {
+    sendCustomCommand(
+        SessionCommand(ACTION_UPGRADE_QUALITY, Bundle.EMPTY),
+        Bundle.EMPTY,
+    )
+}
+
+/**
+ * Asks the service to revert the playing track to YouTube's original stream.
+ */
+fun MediaController.revertToOriginal() {
+    sendCustomCommand(
+        SessionCommand(ACTION_REVERT_TO_ORIGINAL, Bundle.EMPTY),
+        Bundle.EMPTY,
+    )
+}
+
+/**
+ * Asks the service to smoothly transition the playing track to another version/rendition.
+ */
+fun MediaController.swapToVersion(targetSong: Song, resumeAfterSwap: Boolean = false) {
+    sendCustomCommand(
+        SessionCommand(ACTION_SWAP_VERSION, Bundle.EMPTY),
+        bundleOf(
+            EXTRA_SWAP_MEDIA_ITEM to targetSong.toSongBundle(),
+            EXTRA_SWAP_RESUME to resumeAfterSwap,
+        ),
+    )
+}
+
+fun Song.toSongBundle(): Bundle = bundleOf(
+    "videoId" to videoId,
+    "title" to title,
+    "artist" to artist,
+    "thumbnailUrl" to thumbnailUrl,
+    "durationText" to durationText,
+    "artistId" to artistId,
+    "albumId" to albumId,
+    "albumName" to albumName,
+    "isVideo" to isVideo,
+    "isVideoOrigin" to isVideoOrigin,
+    "setVideoId" to setVideoId,
+    "fromAutoplay" to fromAutoplay,
+    "radioName" to radioName,
+    "localUri" to localUri,
+    "downloadFormat" to downloadFormat,
+    "localPath" to localPath,
+    "sourceQuality" to sourceQuality,
+    "playbackSource" to playbackSource,
+    "playbackSourceType" to playbackSourceType?.name,
+    "playbackSourceId" to playbackSourceId,
+    "isExplicit" to (isExplicit ?: false),
+)
+
+fun songFromBundle(b: Bundle): Song = Song(
+    videoId = b.getString("videoId").orEmpty(),
+    title = b.getString("title").orEmpty(),
+    artist = b.getString("artist").orEmpty(),
+    thumbnailUrl = b.getString("thumbnailUrl"),
+    durationText = b.getString("durationText"),
+    artistId = b.getString("artistId"),
+    albumId = b.getString("albumId"),
+    albumName = b.getString("albumName"),
+    isVideo = b.getBoolean("isVideo"),
+    isVideoOrigin = b.getBoolean("isVideoOrigin"),
+    setVideoId = b.getString("setVideoId"),
+    fromAutoplay = b.getBoolean("fromAutoplay"),
+    radioName = b.getString("radioName"),
+    localUri = b.getString("localUri"),
+    downloadFormat = b.getString("downloadFormat"),
+    localPath = b.getString("localPath"),
+    sourceQuality = b.getString("sourceQuality"),
+    playbackSource = b.getString("playbackSource"),
+    playbackSourceType = b.getString("playbackSourceType")?.let { runCatching { com.avyra.music.data.model.PlaybackSourceType.valueOf(it) }.getOrNull() },
+    playbackSourceId = b.getString("playbackSourceId"),
+    isExplicit = if (b.containsKey("isExplicit")) b.getBoolean("isExplicit") else null,
+)
+
+/** Flushes the current radio queue to disk before reporting that it started. */
+suspend fun MediaController.commitRadioQueue() {
+    sendCustomCommand(
+        SessionCommand(ACTION_COMMIT_RADIO_QUEUE, Bundle.EMPTY),
+        Bundle.EMPTY,
+    ).await()
+}
+
+
 /** Mirrors the controller into Compose state, polling position while playing. */
 @Composable
 fun rememberPlayerState(controller: MediaController?): PlayerState {
@@ -124,8 +225,39 @@ fun rememberPlayerState(controller: MediaController?): PlayerState {
     DisposableEffect(controller) {
         val player = controller ?: return@DisposableEffect onDispose {}
 
-        fun sync(error: String? = null) {
+        // A MediaController reads each item across the session boundary. Keep
+        // the converted queue until its timeline actually changes; playback,
+        // buffering, repeat and metadata events do not require another O(n)
+        // walk over a large playlist.
+        var queueSnapshot = emptyList<Song>()
+
+        // Set when the timeline change was the *contents* changing, which is the
+        // only kind this has to convert again.
+        //
+        // `EVENT_TIMELINE_CHANGED` on its own is not that question. It also
+        // fires for `TIMELINE_CHANGE_REASON_SOURCE_UPDATE`, which every track
+        // raises as its source is prepared and reports its real duration — the
+        // running order is identical, only the window it describes has filled
+        // in. Rebuilding on those meant a thousand-track queue converted a
+        // thousand songs out of the session for every track it loaded, on the
+        // main thread, for as long as the queue kept playing.
+        var queueChanged = false
+
+        fun sync(
+            error: String? = null,
+            rebuildQueue: Boolean = false,
+            refreshCurrentQueueItem: Boolean = false,
+        ) {
             val item = player.currentMediaItem
+            if (rebuildQueue) {
+                queueSnapshot = (0 until player.mediaItemCount)
+                    .map { player.getMediaItemAt(it).toSong() }
+            } else if (refreshCurrentQueueItem && item != null) {
+                val index = player.currentMediaItemIndex
+                if (index in queueSnapshot.indices) {
+                    queueSnapshot = queueSnapshot.toMutableList().also { it[index] = item.toSong() }
+                }
+            }
             // Synced here too, so seeking while paused or buffering still moves
             // the scrubber (the poll loop only runs on play).
             position.positionMs = player.currentPosition.coerceAtLeast(0L)
@@ -136,21 +268,37 @@ fun rememberPlayerState(controller: MediaController?): PlayerState {
                 error = error,
                 isLoading = player.playbackState == Player.STATE_BUFFERING,
                 repeatMode = player.repeatMode,
-                queue = (0 until player.mediaItemCount).map { player.getMediaItemAt(it).toSong() },
+                queue = queueSnapshot,
                 queueIndex = player.currentMediaItemIndex,
                 hasPrevious = player.hasPreviousMediaItem(),
                 hasNext = player.hasNextMediaItem(),
+                isQualityUpgraded = item?.mediaMetadata?.extras
+                    ?.getBoolean(EXTRA_QUALITY_UPGRADED) == true,
             )
         }
 
         val listener = object : Player.Listener {
-            override fun onEvents(p: Player, events: Player.Events) = sync(state.error)
+            override fun onTimelineChanged(timeline: Timeline, reason: Int) {
+                // The count guard is belt and braces: a playlist change is the
+                // only reason the queue can be a different length, so if it is,
+                // this must convert it again whatever the reason claims.
+                if (reason == Player.TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED ||
+                    timeline.windowCount != queueSnapshot.size
+                ) {
+                    queueChanged = true
+                }
+            }
+            override fun onEvents(p: Player, events: Player.Events) = sync(
+                error = state.error,
+                rebuildQueue = queueChanged.also { queueChanged = false },
+                refreshCurrentQueueItem = events.contains(Player.EVENT_MEDIA_METADATA_CHANGED),
+            )
             override fun onPlayerErrorChanged(error: androidx.media3.common.PlaybackException?) {
                 sync(error?.let { "Playback failed: ${it.errorCodeName}" })
             }
         }
         player.addListener(listener)
-        sync()
+        sync(rebuildQueue = true)
         onDispose { player.removeListener(listener) }
     }
 
@@ -175,12 +323,9 @@ fun rememberPlayerState(controller: MediaController?): PlayerState {
 /**
  * The inverse of [toMediaItem], as far as a MediaItem can carry a [Song].
  *
- * It has to round-trip losslessly for everything [LastPlayed] stores, because
- * the queue it saves is read back out of the *player* — so a field dropped here
- * is a field that does not survive a restart, however carefully it is
- * persisted. That is what happened to [Song.durationText]: stored, restored,
- * and always null, because this function never carried it back off the item in
- * the first place.
+ * It has to round-trip the fields used by the live queue UI and playback
+ * service. A field dropped here disappears as soon as a Song passes through
+ * Media3, because controllers and service helpers read it back through this.
  */
 fun MediaItem.toSong() = Song(
     videoId = mediaId,
@@ -191,14 +336,49 @@ fun MediaItem.toSong() = Song(
     artistId = mediaMetadata.extras?.getString(EXTRA_ARTIST_ID),
     albumId = mediaMetadata.extras?.getString(EXTRA_ALBUM_ID),
     albumName = mediaMetadata.albumTitle?.toString(),
-    fromAutoplay = this.fromAutoplay,
+    isExplicit = mediaMetadata.extras?.takeIf { it.containsKey(EXTRA_EXPLICIT) }
+        ?.getBoolean(EXTRA_EXPLICIT),
+    isVideo = mediaMetadata.extras?.getBoolean(EXTRA_IS_VIDEO) == true,
+    isVideoOrigin = mediaMetadata.extras?.getBoolean(EXTRA_VIDEO_ORIGIN) == true ||
+        mediaMetadata.extras?.getBoolean(EXTRA_IS_VIDEO) == true,
+    setVideoId = mediaMetadata.extras?.getString(EXTRA_SET_VIDEO_ID),
+    queueTier = this.queueTier,
+    queueEntryId = this.queueEntryId,
+    radioName = mediaMetadata.extras?.getString(EXTRA_RADIO_NAME),
+    playbackSource = mediaMetadata.extras?.getString(EXTRA_PLAYBACK_SOURCE),
+    playbackSourceType = mediaMetadata.extras?.getString(EXTRA_PLAYBACK_SOURCE_TYPE)
+        ?.let { runCatching { PlaybackSourceType.valueOf(it) }.getOrNull() },
+    playbackSourceId = mediaMetadata.extras?.getString(EXTRA_PLAYBACK_SOURCE_ID),
     localUri = mediaMetadata.extras?.getString(EXTRA_LOCAL_URI),
     localPath = mediaMetadata.extras?.getString(EXTRA_LOCAL_PATH),
 )
 
 /** @see Song.fromAutoplay */
 val MediaItem.fromAutoplay: Boolean
-    get() = mediaMetadata.extras?.getBoolean(EXTRA_FROM_AUTOPLAY) == true
+    get() = queueTier == QueueTier.AUTOPLAY
+
+/** @see Song.queueTier */
+val MediaItem.queueTier: QueueTier
+    get() {
+        return when (mediaMetadata.extras?.getString(EXTRA_QUEUE_TIER)) {
+            "USER_QUEUE" -> QueueTier.USER_QUEUE
+            "CONTEXT" -> QueueTier.CONTEXT
+            "AUTOPLAY" -> QueueTier.AUTOPLAY
+            else -> if (mediaMetadata.extras?.getBoolean(EXTRA_FROM_AUTOPLAY) == true) {
+                QueueTier.AUTOPLAY
+            } else {
+                QueueTier.CONTEXT
+            }
+        }
+    }
+
+/** @see Song.queueEntryId */
+val MediaItem.queueEntryId: String?
+    get() = mediaMetadata.extras?.getString(EXTRA_QUEUE_ENTRY_ID)
+
+/** Public metadata keys for queue categorization and immutable queue entry identity. */
+const val EXTRA_QUEUE_TIER = "avyra.queueTier"
+const val EXTRA_QUEUE_ENTRY_ID = "avyra.queueEntryId"
 
 /**
  * Marks a queue entry as AutoPlay's rather than the user's. Carried on the
@@ -206,6 +386,14 @@ val MediaItem.fromAutoplay: Boolean
  * the player, and the UI only ever sees it back through a MediaController.
  */
 private const val EXTRA_FROM_AUTOPLAY = "avyra.fromAutoplay"
+
+/** @see Song.radioName */
+private const val EXTRA_RADIO_NAME = "avyra.radioName"
+
+/** @see Song.playbackSource */
+private const val EXTRA_PLAYBACK_SOURCE = "avyra.playbackSource"
+private const val EXTRA_PLAYBACK_SOURCE_TYPE = "avyra.playbackSourceType"
+private const val EXTRA_PLAYBACK_SOURCE_ID = "avyra.playbackSourceId"
 
 /**
  * The artist and album pages this track hangs under, when they are known.
@@ -218,11 +406,14 @@ private const val EXTRA_FROM_AUTOPLAY = "avyra.fromAutoplay"
 private const val EXTRA_ARTIST_ID = "avyra.artistId"
 private const val EXTRA_ALBUM_ID = "avyra.albumId"
 
+/** @see Song.setVideoId */
+private const val EXTRA_SET_VIDEO_ID = "avyra.setVideoId"
+
 /** @see Song.localUri */
-private const val EXTRA_LOCAL_URI = "avyra.localUri"
+internal const val EXTRA_LOCAL_URI = "avyra.localUri"
 
 /** @see Song.localPath */
-private const val EXTRA_LOCAL_PATH = "avyra.localPath"
+internal const val EXTRA_LOCAL_PATH = "avyra.localPath"
 
 /**
  * How long the track runs, as the row that queued it said.
@@ -231,29 +422,21 @@ private const val EXTRA_LOCAL_PATH = "avyra.localPath"
  * is the *player's* to state, and the player takes its own figure from the
  * decoder. This one is the claim a cross-source match is made on — see
  * [TrackMatcher] — and the two disagree often enough that overwriting either
- * with the other loses information. Carried so that [toSong] can give it back,
- * which is what [LastPlayed] saves and what puts `&d=` on a restored track's
- * playback URI.
+ * with the other loses information. Carried so that [toSong] can give it back
+ * to the live queue and matching code.
  */
 private const val EXTRA_DURATION = "avyra.durationText"
+private const val EXTRA_EXPLICIT = "avyra.explicit"
+private const val EXTRA_IS_VIDEO = "avyra.isVideo"
+private const val EXTRA_VIDEO_ORIGIN = "avyra.isVideoOrigin"
 
-/**
- * Where AutoPlay's section of the queue begins, and so where a track queued by
- * hand belongs — above the mix, below everything the user picked.
- *
- * Read as "the first of AutoPlay's tracks still to come", which is what keeps
- * it below the playing track even when the mix itself is what's playing: the
- * tracks of it already behind you count as played, and the section starts
- * again below the needle. Tracks put in by hand there — "Play next" while the
- * mix runs — stay above it too, for the same reason.
- *
- * The queue panel draws its AutoPlay heading at this same index.
- */
-fun autoplaySectionStart(fromAutoplay: List<Boolean>, currentIndex: Int): Int {
-    val after = (currentIndex + 1).coerceIn(0, fromAutoplay.size)
-    return (after until fromAutoplay.size).firstOrNull { fromAutoplay[it] }
-        ?: fromAutoplay.size
-}
+/** Set only on the replacement item produced by [QualityUpgrade]. */
+const val EXTRA_QUALITY_UPGRADED = "avyra.qualityUpgraded"
+
+/** Whether this item was selected from a music-video row, even after conversion. */
+val MediaItem.isVideoOrigin: Boolean
+    get() = mediaMetadata.extras?.getBoolean(EXTRA_VIDEO_ORIGIN) == true ||
+        mediaMetadata.extras?.getBoolean(EXTRA_IS_VIDEO) == true
 
 fun MediaController.autoplaySectionStart(): Int = autoplaySectionStart(
     fromAutoplay = (0 until mediaItemCount).map { getMediaItemAt(it).fromAutoplay },
@@ -263,12 +446,8 @@ fun MediaController.autoplaySectionStart(): Int = autoplaySectionStart(
 /**
  * Custom scheme; PlaybackService resolves the real stream URL at play time.
  *
- * A video-tagged [Song] is expected to already have been swapped for its
- * catalogue audio release by [com.avyra.music.data.YtMusicRepository.resolveAudio]
- * before this is called — the queue, history and the notification should
- * never see the video upload's id or title, only whatever the audio match
- * resolved to (or the video's own audio, as the deliberate fallback when no
- * match was found).
+ * A video-tagged [Song] plays using the video's own audio by default. The
+ * player can explicitly replace just the current item with a catalogue match.
  */
 /**
  * MP4-family containers (m4a/aac/amr/wma/...) store their header or trailing
@@ -303,6 +482,12 @@ private fun Song.matchQuery(): String = buildString {
     append("&n=").append(Uri.encode(title))
     append("&a=").append(Uri.encode(artist))
     TrackMatcher.secondsOf(durationText)?.let { append("&d=").append(it) }
+    albumName?.takeIf { it.isNotBlank() }?.let { append("&l=").append(Uri.encode(it)) }
+    isExplicit?.let { append("&e=").append(if (it) "1" else "0") }
+    // `m` controls source routing, not player policy. A converted catalogue
+    // track keeps [isVideoOrigin] for AutoMix, but is intentionally audio here
+    // so the normal source-quality upgrade path can improve it.
+    if (isVideo) append("&m=1")
 }
 
 fun Song.toMediaItem(): MediaItem {
@@ -328,10 +513,9 @@ fun Song.toMediaItem(): MediaItem {
     // [localUri] needs it just as much as the lookup does, and for a reason that
     // is easy to miss: it is not only set from a folder read that just verified
     // the file. It also round-trips off the player's own item through
-    // [MediaItem.toSong], and is persisted and restored by [LastPlayed] — so a
-    // queue restored after a restart carries whatever was true whenever it was
-    // last saved. Checking only the lookup leaves exactly that path unguarded,
-    // which is the one a resumed queue takes.
+    // [MediaItem.toSong], so an item waiting in the live queue can carry a URI
+    // that has become stale since it was created. Checking only the lookup
+    // leaves that path unguarded.
     val offlineUri = localUri?.takeUnless(Downloads::isMissingLocalFile)
         ?: Downloads.verifiedSavedUri(videoId)
     val uriString = offlineUri ?: when {
@@ -344,6 +528,13 @@ fun Song.toMediaItem(): MediaItem {
         // option either.
         sourceTrack != null -> SourceRegistry.trackUri(sourceTrack.first, sourceTrack.second)
             .let { "$it${matchQuery()}" }
+        // A track the listener reverted by hand stays reverted — see
+        // [OriginalVersion]. Applied here rather than at the one menu that
+        // reverts, because "stays" has to mean the next queue entry built for
+        // this song too: another play from a list, a restored queue, Android
+        // Auto. Everything downstream reads the item's URI and nothing reads
+        // the preference, so this is the only place it has to be said.
+        OriginalVersion.isPinned(videoId) -> directYouTubeUri()
         // The same three fields, for the same reason, on the YouTube path: a
         // source ranked above YouTube gets offered this track before YouTube
         // resolves it — see [SourceResolver.substituteForYouTube] — and that
@@ -390,21 +581,34 @@ fun Song.toMediaItem(): MediaItem {
             //
             // Set for every track rather than only the local and AutoPlay ones,
             // because the runtime applies to all of them: gated on those two, a
-            // plain YouTube track carried no extras at all, so [toSong] read
-            // back a null duration, [LastPlayed] stored a null, and the restored
-            // queue lost the `&d=` its matching depends on.
+            // plain YouTube track carries no extras at all, so [toSong] reads
+            // back a null duration and later matching loses the `&d=` it
+            // depends on.
             .apply {
-                if (fromAutoplay || offlineUri != null || durationText != null ||
-                    artistId != null || albumId != null
+                if (queueTier != QueueTier.CONTEXT || queueEntryId != null || fromAutoplay ||
+                    offlineUri != null || durationText != null ||
+                    artistId != null || albumId != null || setVideoId != null ||
+                    isExplicit != null || isVideo || isVideoOrigin || radioName != null ||
+                    playbackSource != null || playbackSourceType != null || playbackSourceId != null
                 ) {
                     setExtras(
                         bundleOf(
+                            EXTRA_QUEUE_TIER to queueTier.name,
+                            EXTRA_QUEUE_ENTRY_ID to queueEntryId,
                             EXTRA_FROM_AUTOPLAY to fromAutoplay,
+                            EXTRA_RADIO_NAME to radioName,
+                            EXTRA_PLAYBACK_SOURCE to playbackSource,
+                            EXTRA_PLAYBACK_SOURCE_TYPE to playbackSourceType?.name,
+                            EXTRA_PLAYBACK_SOURCE_ID to playbackSourceId,
                             EXTRA_LOCAL_URI to offlineUri,
                             EXTRA_LOCAL_PATH to localPath,
                             EXTRA_DURATION to durationText,
                             EXTRA_ARTIST_ID to artistId,
                             EXTRA_ALBUM_ID to albumId,
+                            EXTRA_SET_VIDEO_ID to setVideoId,
+                            EXTRA_EXPLICIT to isExplicit,
+                            EXTRA_IS_VIDEO to isVideo,
+                            EXTRA_VIDEO_ORIGIN to isVideoOrigin,
                         ),
                     )
                 }
@@ -413,6 +617,57 @@ fun Song.toMediaItem(): MediaItem {
     )
     .build()
 }
+
+/**
+ * The current song reopened through YouTube alone, bypassing every substitute
+ * and quality-upgrade path.  The separate rendition tag is essential: the
+ * base cache key may currently contain JioSaavn or module bytes, and resuming
+ * that entry as though it were a YouTube WebM corrupts the stream.
+ */
+fun Song.toDirectYouTubeMediaItem(): MediaItem =
+    toMediaItem().buildUpon()
+        .setUri(directYouTubeUri())
+        .build()
+
+private fun Song.directYouTubeUri(): String =
+    "avyra://watch?v=$videoId${matchQuery()}&$DIRECT_YOUTUBE_PARAMETER=1&q=original"
+
+/**
+ * Whether there is a YouTube upload behind this song to go back *to* — the
+ * question "Revert to original" only means something for.
+ *
+ * Offered for any track that has one rather than only for a track a quality
+ * upgrade has visibly swapped, because the swap is not the only way to end up
+ * on a copy that is wrong. A source ranked above YouTube gets first refusal on
+ * every track — see [SourceResolver.substituteForYouTube] — so a song can be
+ * playing JioSaavn's or a module's idea of it from its very first second, with
+ * nothing on screen having changed and nothing to undo. Those are precisely the
+ * ones worth doubting: the match is made on title, artist and runtime, and a
+ * live version, a remaster or a different mix agreeing on all three is a
+ * catalogue's ordinary business. The listener is the only one who can hear that
+ * it is the wrong recording, and until this was always available they had no
+ * way to say so.
+ *
+ * The three exclusions are all "there is no such upload", not "reverting would
+ * be unwise":
+ *
+ *  - a track queued from a module's own catalogue has no YouTube id at all,
+ *    only a source-and-track key that would build a nonsense URI;
+ *  - a file on the device is identified by its own `content://` or `file://`
+ *    URI, for the same reason;
+ *  - a music video *is* the YouTube upload, so there is nowhere for it to go.
+ *    Its catalogue match is a separate control with its own way back — see
+ *    `VideoAudioVersionButton`.
+ */
+fun Song.hasYouTubeOriginal(): Boolean =
+    videoId.isNotBlank() &&
+        !videoId.startsWith("content://") &&
+        !videoId.startsWith("file://") &&
+        !isVideo &&
+        SourceRegistry.parseTrackKey(videoId) == null
+
+/** A playback URI carrying this is explicitly requested YouTube, never a substitute. */
+const val DIRECT_YOUTUBE_PARAMETER = "direct_youtube"
 
 /**
  * Which track a playback URI is for, as a media id — the inverse of the URI
@@ -437,14 +692,40 @@ fun mediaIdIn(uri: Uri): String? = if (uri.authority == "source") {
     uri.getQueryParameter("v")
 }
 
-fun MediaController.playSongs(songs: List<Song>, startIndex: Int) {
+/**
+ * Replaces the queue with [songs] and starts it.
+ *
+ * Suspending because of the mapping: [toMediaItem] is not the cheap struct copy
+ * it looks like — it builds a URI and a metadata bundle per track, and asks
+ * [Downloads] whether the file it has on record for the track is still on disk,
+ * which is a `stat` per downloaded song. One track's worth of that is nothing.
+ * A playlist's worth is hundreds of milliseconds of it, and run inline it lands
+ * on the frame that handles the tap, so the page freezes before the music
+ * starts. Built off the main thread and handed to the player back on it, which
+ * is where Media3 requires the call to be made.
+ */
+suspend fun MediaController.playSongs(songs: List<Song>, startIndex: Int) {
     if (songs.isEmpty()) return
     // A queue started while shuffle is on goes in shuffled rather than being
     // played out of order — see [QueueShuffle]. The track the user picked still
     // leads, so it ends up at the top instead of at [startIndex].
     val shuffled = QueueShuffle.enabled.value
-    val queue = if (shuffled) QueueShuffle.startingOrder(songs, startIndex) else songs
-    setMediaItems(queue.map { it.toMediaItem() }, if (shuffled) 0 else startIndex, 0L)
+    val items = withContext(Dispatchers.Default) {
+        val queue = if (shuffled) {
+            QueueShuffle.startingOrder(songs, startIndex.coerceIn(songs.indices))
+        } else {
+            songs
+        }
+        queue.map { it.toMediaItem() }
+    }
+    setMediaItems(items, queueStartIndex(startIndex, items.size, shuffled), 0L)
     prepare()
     play()
 }
+
+/**
+ * The selected track is moved to the head when a new queue is shuffled, so
+ * playback must begin there rather than at its index in the unshuffled list.
+ */
+internal fun queueStartIndex(requestedIndex: Int, itemCount: Int, shuffled: Boolean): Int =
+    if (shuffled) 0 else requestedIndex.coerceIn(0, itemCount - 1)

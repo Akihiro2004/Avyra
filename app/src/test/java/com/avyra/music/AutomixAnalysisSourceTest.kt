@@ -1,18 +1,33 @@
 package com.avyra.music
 
 import com.avyra.music.playback.smart.AutomixAnalysisSource
-import org.junit.Assert.assertFalse
+import com.avyra.music.playback.QualityUpgrade
+import com.avyra.music.data.sources.StreamFormat
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertFalse
 import org.junit.Test
 
 class AutomixAnalysisSourceTest {
-    @Test fun `youtube analysis accepts only its canonical cache key`() {
+    @Test
+    fun `YouTube analysis accepts only its canonical Opus cache key`() {
         assertTrue(AutomixAnalysisSource.isCanonicalYouTubeRendition("video", "video"))
         assertFalse(AutomixAnalysisSource.isCanonicalYouTubeRendition("video", "video#alt"))
         assertFalse(AutomixAnalysisSource.isCanonicalYouTubeRendition("video", "video#hifi"))
     }
 
-    @Test fun `local audio is not constrained to a youtube cache key`() {
-        assertTrue(AutomixAnalysisSource.isCanonicalYouTubeRendition(null, "content://song"))
+    @Test
+    fun `analysis URI asks the resolver to bypass playback substitutions`() {
+        assertTrue(AutomixAnalysisSource.opusUri("video").contains("v=video&automix_opus=1"))
+        assertTrue(AutomixAnalysisSource.requestsYouTubeOpus("1"))
+        assertFalse(AutomixAnalysisSource.requestsYouTubeOpus(null))
+        assertFalse(AutomixAnalysisSource.requestsYouTubeOpus("0"))
+    }
+
+    @Test
+    fun `second quality upgrade gets a new rendition marker`() {
+        val jio = QualityUpgrade.upgradedUri("avyra://watch?v=video")
+        val lossless = QualityUpgrade.upgradedUri(jio)
+        assertTrue(jio.endsWith("q=hifi"))
+        assertTrue(lossless.endsWith("q=hifi-2"))
     }
 }

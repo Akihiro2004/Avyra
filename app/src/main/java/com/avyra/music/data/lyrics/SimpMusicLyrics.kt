@@ -50,13 +50,13 @@ object SimpMusicLyrics {
         }
 
     @Serializable
-    internal data class Response(
+    data class Response(
         val success: Boolean = false,
         val data: List<Track>? = null,
     )
 
     @Serializable
-    internal data class Track(
+    data class Track(
         val duration: Int? = null,
         val richSyncLyrics: String? = null,
         val syncedLyrics: String? = null,

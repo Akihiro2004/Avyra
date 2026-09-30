@@ -21,9 +21,14 @@
 
 package com.avyra.music.playback.smart
 
-import android.util.Log
-import org.json.JSONArray
-import org.json.JSONObject
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * Whole-track envelope, structure and key analysis, from the native DSP
@@ -39,7 +44,7 @@ import org.json.JSONObject
 object TrackFeatures {
 
     /** True when the native library loaded. Analysis is optional, so this is a fact, not a fault. */
-    val available: Boolean = runCatching { System.loadLibrary("avyra_analysis") }.isSuccess
+    val available: Boolean get() = NativeAnalysisLibrary.available
 
     /**
      * The rate the analyzer's window and hop constants assume, deliberately
@@ -58,10 +63,10 @@ object TrackFeatures {
     fun analyze(samples: FloatArray, durationSeconds: Double): Features? {
         if (!available || samples.isEmpty()) return null
         val json = runCatching { nativeAnalyze(samples, sampleRate, durationSeconds) }
-            .onFailure { Log.w(TAG, "Native analysis failed", it) }
+            .onFailure { AnalysisLog.warn("Native analysis failed", it) }
             .getOrNull() ?: return null
-        return runCatching { parse(JSONObject(json)) }
-            .onFailure { Log.w(TAG, "Could not parse analysis output", it) }
+        return runCatching { parse(Json.parseToJsonElement(json).jsonObject) }
+            .onFailure { AnalysisLog.warn("Could not parse analysis output", it) }
             .getOrNull()
     }
 
@@ -104,22 +109,22 @@ object TrackFeatures {
         val mixOutCandidates: List<MixCandidate>,
     )
 
-    fun parse(root: JSONObject): Features = Features(
-        duration = root.optDouble("duration", 0.0).orZero(),
-        bpm = root.optDouble("bpm", 0.0).orZero(),
-        beatInterval = root.optDouble("beatInterval", 0.0).orZero(),
-        firstBeat = root.optDouble("firstBeat", 0.0).orZero(),
-        beatConfidence = root.optDouble("beatConfidence", 0.0).orZero(),
-        key = root.optString("key", ""),
-        keyConfidence = root.optDouble("keyConfidence", 0.0).orZero(),
-        audibleStartTime = root.optDouble("audibleStartTime", 0.0).orZero(),
-        pickupTime = root.optDouble("pickupTime", 0.0).orZero(),
-        introEndTime = root.optDouble("introEndTime", 0.0).orZero(),
-        outroStartTime = root.optDouble("outroStartTime", 0.0).orZero(),
-        contentEndTime = root.optDouble("contentEndTime", 0.0).orZero(),
-        mixInTime = root.optDouble("mixInTime", 0.0).orZero(),
-        mixOutTime = root.optDouble("mixOutTime", 0.0).orZero(),
-        vocalProbability = root.optDouble("vocalProbability", 0.0).orZero(),
+    fun parse(root: JsonObject): Features = Features(
+        duration = root.number("duration"),
+        bpm = root.number("bpm"),
+        beatInterval = root.number("beatInterval"),
+        firstBeat = root.number("firstBeat"),
+        beatConfidence = root.number("beatConfidence"),
+        key = root.text("key"),
+        keyConfidence = root.number("keyConfidence"),
+        audibleStartTime = root.number("audibleStartTime"),
+        pickupTime = root.number("pickupTime"),
+        introEndTime = root.number("introEndTime"),
+        outroStartTime = root.number("outroStartTime"),
+        contentEndTime = root.number("contentEndTime"),
+        mixInTime = root.number("mixInTime"),
+        mixOutTime = root.number("mixOutTime"),
+        vocalProbability = root.number("vocalProbability"),
         downbeats = root.doubles("downbeats"),
         phraseBoundaries = root.doubles("phraseBoundaries"),
         vocalActivityMask = root.doubles("vocalActivityMask"),
@@ -129,46 +134,43 @@ object TrackFeatures {
         mixOutCandidates = root.cuePoints("mixOutCandidates"),
     )
 
-    private fun JSONObject.doubles(name: String): List<Double> {
-        val array = optJSONArray(name) ?: return emptyList()
-        return buildList(array.length()) {
-            for (index in 0 until array.length()) {
-                array.optDouble(index).takeIf { it.isFinite() }?.let(::add)
-            }
+    private fun JsonObject.number(name: String): Double =
+        (this[name]?.jsonPrimitive?.doubleOrNull ?: 0.0).orZero()
+
+    private fun JsonObject.text(name: String): String =
+        this[name]?.jsonPrimitive?.contentOrNull ?: ""
+
+    private fun JsonObject.array(name: String): JsonArray? =
+        runCatching { this[name]?.jsonArray }.getOrNull()
+
+    private fun JsonObject.doubles(name: String): List<Double> {
+        val array = array(name) ?: return emptyList()
+        return array.mapNotNull { it.jsonPrimitive.doubleOrNull?.takeIf(Double::isFinite) }
+    }
+
+    private fun JsonObject.energyCurve(name: String): List<EnergySample> {
+        val array = array(name) ?: return emptyList()
+        return array.mapNotNull { element ->
+            val point = runCatching { element.jsonObject }.getOrNull() ?: return@mapNotNull null
+            val time = point["t"]?.jsonPrimitive?.doubleOrNull ?: return@mapNotNull null
+            val energy = point["e"]?.jsonPrimitive?.doubleOrNull ?: return@mapNotNull null
+            if (time.isFinite() && energy.isFinite()) EnergySample(time, energy) else null
         }
     }
 
-    private fun JSONObject.energyCurve(name: String): List<EnergySample> {
-        val array: JSONArray = optJSONArray(name) ?: return emptyList()
-        return buildList(array.length()) {
-            for (index in 0 until array.length()) {
-                val point = array.optJSONObject(index) ?: continue
-                val time = point.optDouble("t", Double.NaN)
-                val energy = point.optDouble("e", Double.NaN)
-                if (time.isFinite() && energy.isFinite()) add(EnergySample(time, energy))
-            }
+    private fun JsonObject.cuePoints(name: String): List<MixCandidate> {
+        val array = array(name) ?: return emptyList()
+        return array.mapNotNull { element ->
+            val point = runCatching { element.jsonObject }.getOrNull() ?: return@mapNotNull null
+            val time = point["t"]?.jsonPrimitive?.doubleOrNull?.takeIf(Double::isFinite)
+                ?: return@mapNotNull null
+            MixCandidate(
+                time = time,
+                score = point.number("s"),
+                type = point.text("y"),
+            )
         }
     }
-
-    private fun JSONObject.cuePoints(name: String): List<MixCandidate> {
-        val array: JSONArray = optJSONArray(name) ?: return emptyList()
-        return buildList(array.length()) {
-            for (index in 0 until array.length()) {
-                val point = array.optJSONObject(index) ?: continue
-                val time = point.optDouble("t", Double.NaN)
-                if (!time.isFinite()) continue
-                add(
-                    MixCandidate(
-                        time = time,
-                        score = point.optDouble("s", 0.0).orZero(),
-                        type = point.optString("y", ""),
-                    ),
-                )
-            }
-        }
-    }
-
-    private const val TAG = "AvyraTrackFeatures"
 
     @JvmStatic private external fun nativeAnalyze(
         samples: FloatArray,

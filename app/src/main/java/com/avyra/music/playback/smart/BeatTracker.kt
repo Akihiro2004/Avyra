@@ -24,8 +24,6 @@ package com.avyra.music.playback.smart
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
-import android.content.Context
-import android.util.Log
 import java.io.File
 import java.nio.FloatBuffer
 import kotlin.math.abs
@@ -48,7 +46,19 @@ import kotlin.math.roundToInt
  * peaks, all resolve to null, and the caller keeps whatever it had. A missing beat tracker
  * degrades transitions; a throwing one would break playback.
  */
-class BeatTracker(private val context: Context) {
+class BeatTracker(
+    /**
+     * Where the model lives, resolved lazily.
+     *
+     * A path rather than a [Context]: this is the only thing the tracker ever
+     * wanted the platform for, and each application already knows how to put
+     * its own copy of the weights somewhere readable — unpacked from assets on
+     * Android, from the jar's resources on the desktop.
+     */
+    private val modelPath: () -> String,
+    /** How many threads inference may use; the beat and downbeat pass is the expensive one. */
+    private val inferenceThreads: () -> Int,
+) {
 
     /** A tracked grid on the analysed audio's own timeline, in seconds. */
     data class Grid(
@@ -61,22 +71,21 @@ class BeatTracker(private val context: Context) {
     )
 
     @Volatile private var session: OrtSession? = null
+    @Volatile private var sessionThreads = 0
     private val lock = Any()
 
     /** Parsing the graph is far too expensive to repeat per track, so one session is kept. */
     private fun session(): OrtSession? {
-        session?.let { return it }
+        val threads = inferenceThreads()
+        session?.takeIf { sessionThreads == threads }?.let { return it }
         synchronized(lock) {
-            session?.let { return it }
+            session?.takeIf { sessionThreads == threads }?.let { return it }
+            runCatching { session?.close() }
+            session = null
             return runCatching {
-                val file = File(context.filesDir, MODEL_ASSET)
-                if (!file.exists() || file.length() == 0L) {
-                    context.assets.open(MODEL_ASSET).use { input ->
-                        file.outputStream().use { output -> input.copyTo(output) }
-                    }
-                }
+                val file = File(modelPath())
                 val options = OrtSession.SessionOptions().apply {
-                    setIntraOpNumThreads(INFERENCE_THREADS)
+                    setIntraOpNumThreads(threads)
                     setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
                     // ORT's arena allocator keeps every block it has ever needed, which for this
                     // graph is tens of megabytes of native heap retained for the life of the
@@ -87,8 +96,11 @@ class BeatTracker(private val context: Context) {
                     setMemoryPatternOptimization(false)
                 }
                 OrtEnvironment.getEnvironment().createSession(file.absolutePath, options)
-                    .also { session = it }
-            }.onFailure { Log.w(TAG, "Beat model unavailable; falling back to no grid", it) }
+                    .also {
+                        session = it
+                        sessionThreads = threads
+                    }
+            }.onFailure { AnalysisLog.warn("Beat model unavailable; falling back to no grid", it) }
                 .getOrNull()
         }
     }
@@ -109,9 +121,7 @@ class BeatTracker(private val context: Context) {
         val downbeatLogits = FloatArray(spectrogram.frames)
         val inferStarted = System.currentTimeMillis()
         if (!infer(active, spectrogram, beatLogits, downbeatLogits)) return null
-        Log.d(
-            TAG,
-            "mel ${melMs}ms (${spectrogram.frames} frames) " +
+        AnalysisLog.warn("mel ${melMs}ms (${spectrogram.frames} frames) " +
                 "infer ${System.currentTimeMillis() - inferStarted}ms",
         )
 
@@ -194,20 +204,20 @@ class BeatTracker(private val context: Context) {
             start += stride
         }
         true
-    }.onFailure { Log.w(TAG, "Beat inference failed", it) }.getOrDefault(false)
+    }.onFailure { AnalysisLog.warn("Beat inference failed", it) }.getOrDefault(false)
 
     fun release() {
         synchronized(lock) {
             runCatching { session?.close() }
             session = null
+            sessionThreads = 0
         }
     }
 
     companion object {
         private const val TAG = "AvyraBeatTracker"
-        private const val MODEL_ASSET = "beat_this_int8.onnx"
-        private const val INFERENCE_THREADS = 4
-
+        /** The weights this tracker needs, named once for every build that ships them. */
+        const val MODEL_ASSET = "beat_this_int8.onnx"
         /** The window the model was trained on, and the margin discarded from each chunk's edges. */
         const val CHUNK_FRAMES = 1500
         const val BORDER_FRAMES = 6

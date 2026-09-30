@@ -1,6 +1,5 @@
 package com.avyra.music.data
 
-import android.util.Log
 import okhttp3.ConnectionPool
 import okhttp3.Dispatcher
 import okhttp3.OkHttpClient
@@ -97,7 +96,7 @@ object Http {
             val range = request.header("Range")
             val counting = CountingSource(body.source()) { bytes ->
                 val total = usageTotals.computeIfAbsent(host) { AtomicLong() }.addAndGet(bytes)
-                Log.d(
+                DebugLog.d(
                     USAGE_TAG,
                     "$host ${request.method} ${request.url.encodedPath} " +
                         "range=$range status=${response.code} bytes=$bytes total[$host]=$total",
@@ -108,12 +107,36 @@ object Http {
     }
     // ---- End temporary instrumentation ----------------------------------
 
+    /**
+     * Adds the WebDAV Basic credential to requests aimed at the configured
+     * server, so both PROPFIND listings and ExoPlayer's media fetches (which
+     * share this client via OkHttpDataSource) authenticate the same way.
+     *
+     * Read off [com.avyra.music.data.webdav.WebDavAuth] rather than prefs
+     * so the network layer never touches storage: AppSettings publishes here.
+     */
+    private val webDavInterceptor = okhttp3.Interceptor { chain ->
+        val request = chain.request()
+        if (request.header("Authorization") == null &&
+            com.avyra.music.data.webdav.WebDavAuth.shouldAuthorize(request.url.host)
+        ) {
+            val header = com.avyra.music.data.webdav.WebDavAuth.authHeader
+            if (!header.isNullOrBlank()) {
+                return@Interceptor chain.proceed(
+                    request.newBuilder().header("Authorization", header).build(),
+                )
+            }
+        }
+        chain.proceed(request)
+    }
+
     val client: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
         .dispatcher(Dispatcher().apply { maxRequestsPerHost = 16 })
         .connectionPool(ConnectionPool(16, 5, TimeUnit.MINUTES))
+        .addInterceptor(webDavInterceptor)
         .apply { if (USAGE_LOGGING_ENABLED) addNetworkInterceptor(usageInterceptor) }
         .build()
 }

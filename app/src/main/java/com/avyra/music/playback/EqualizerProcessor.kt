@@ -5,174 +5,196 @@ import androidx.media3.common.C
 import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.audio.BaseAudioProcessor
 import androidx.media3.common.util.UnstableApi
+import com.avyra.music.playback.audio.AudioBlock
+import com.avyra.music.playback.audio.FloatAudioProcessor
+import com.avyra.music.playback.audio.PcmBoundary
+import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.abs
-import kotlin.math.cos
+import kotlin.math.exp
+import kotlin.math.ln
 import kotlin.math.min
-import kotlin.math.sin
-import kotlin.math.tanh
+import kotlin.math.pow
+import kotlin.math.sqrt
+import kotlin.math.tan
 
 /**
- * A ten-band equalizer that runs inside the player rather than beside it.
+ * 10-band parametric equaliser, tone controls, pre-amp and left/right balance.
  *
- * The row this replaces did not equalize anything: it fired
- * `ACTION_DISPLAY_AUDIO_EFFECT_CONTROL_PANEL` and hoped the manufacturer had
- * shipped an app to catch it. On a device that hadn't, it toasted and did
- * nothing — and on one that had, the curve, the band count and the quality all
- * belonged to somebody else. It also sat *downstream* of everything in this
- * file's neighbourhood, at the audio track, so it could never be reasoned about
- * alongside the spatial widener or the transition filter.
+ * ## The layout
  *
- * This sits in the same chain as those two, gets the same 16-bit PCM, and
- * behaves identically on every device.
+ * [EqLayout] fixes the layout of sections. Bands 0 and 9 are shelves (cornered
+ * at 60 Hz and 14 kHz); the eight between them are peaking bells. The tone
+ * controls (Bass / Treble) share the two shelf sections rather than sitting in
+ * series with them, so a curve that touches both adds the two gains together.
  *
- * ### The filters
+ * Balance is an output trim rather than an extra section, and does not run at
+ * all for mono files — see [onConfigure].
  *
- * One peaking biquad per band per channel, cascaded — the standard
- * constant-Q design, at [Q_OCTAVE] for the one-octave spacing the ISO centres
- * in [FREQUENCIES] imply. Peaking rather than shelving at the ends: a shelf at
- * 31 Hz lifts everything below it including DC and rumble no speaker will
- * reproduce, and the same at 16 kHz lifts hiss. A bell leaves both alone.
+ * ## State-variable filters
  *
- * Run as transposed direct form II, which is the form that keeps its
- * arithmetic well-conditioned at the low end — a 31 Hz bell at 44.1 kHz has its
- * poles extremely close to the unit circle, and direct form I accumulates
- * visible error there.
+ * Implemented as two-integrator state-variable sections using the bilinear
+ * transform with frequency pre-warping (the standard trapezoidal SVF). Chosen
+ * because SVFs decouple frequency from Q — changing gain or bandwidth does not
+ * shift the centre — and because their internal states stay bounded under
+ * parameter modulation, which lets the user drag a band smoothly without
+ * generating transients.
  *
- * ### Three things a naive EQ gets wrong
+ * ## Gliding
  *
- *  - **Gain changes have to glide.** Writing new coefficients the instant a
- *    slider moves steps the transfer function between samples, which is a
- *    click. Gains ramp toward their targets a block at a time, the same way
- *    [TransitionFilterProcessor] ramps its cutoffs and for the same reason.
- *  - **Boosting needs headroom.** Ten bands lifted at once will exceed full
- *    scale on any loud track, and clamping to `Short` there is not "loud", it
- *    is distortion. Hence [preampDb], and hence the soft limiter below it —
- *    the preamp is the honest fix and the limiter is the net under it.
- *  - **Flat has to cost nothing.** An EQ sitting at 0 dB should be
- *    indistinguishable from no EQ, not merely inaudible: see the bypass in
- *    [queueInput], which hands the buffer through untouched rather than
- *    running ten unity-gain biquads over it.
+ * Every slider change is a target, not a step. The processor updates its
+ * coefficients once per [GLIDE_FRAMES] frames, chasing the target curve
+ * smoothly. This turns an abrupt preset switch into a short, inaudible glide
+ * instead of a transient that would clip or click.
  */
 @UnstableApi
 class EqualizerProcessor : BaseAudioProcessor() {
 
-    /** Whether the listener has switched the effect on at all. */
+    /** What the processor is aiming at. Swapped whole, never mutated in place. */
+    private class Tuning(val curve: EqCurve, val balance: Float) {
+        companion object {
+            val OFF = Tuning(EqCurve.FLAT, 0f)
+        }
+    }
+
     @Volatile
-    var enabled: Boolean = false
-
-    private val targetGainDb = FloatArray(BANDS)
-    private val currentGainDb = FloatArray(BANDS)
-
-    @Volatile
-    private var targetPreampDb: Float = 0f
-    private var currentPreampDb: Float = 0f
-
-    /** Normalized biquad coefficients, five per band. */
-    private val coefficients = FloatArray(BANDS * 5)
-
-    /**
-     * Filter memory: two words per band per channel.
-     *
-     * One flat array rather than nested ones because this is indexed once per
-     * sample per band — at 48 kHz stereo that is nearly a million lookups a
-     * second, and an array of arrays pays a bounds check and a pointer chase on
-     * every one of them.
-     */
-    private var state = FloatArray(0)
+    private var target: Tuning = Tuning.OFF
 
     private var channelCount = 0
     private var sampleRate = 0
 
-    /** Set whenever a target moves, so coefficients are rebuilt only then. */
-    private var coefficientsStale = true
+    private val currentGainDb = FloatArray(EqLayout.SLOTS)
+    private val currentQ = FloatArray(EqLayout.SLOTS) { 0.707f }
+    private var currentPreampDb = 0f
+    private var currentBalance = 0f
 
-    // ---- Controls ----------------------------------------------------------
+    private val coeffA1 = FloatArray(EqLayout.SLOTS)
+    private val coeffA2 = FloatArray(EqLayout.SLOTS)
+    private val coeffA3 = FloatArray(EqLayout.SLOTS)
+    private val mixInput = FloatArray(EqLayout.SLOTS)
+    private val mixBand = FloatArray(EqLayout.SLOTS)
+    private val mixLow = FloatArray(EqLayout.SLOTS)
+
+    /** Which sections are worth running this sub-block, and how many. */
+    private val activeSlots = IntArray(EqLayout.SLOTS)
+    private val running = BooleanArray(EqLayout.SLOTS)
+
+    /** Two integrator states per section, per channel. */
+    private var state = FloatArray(0)
+
+    /** Output trim per channel: make-up attenuation, and balance where stereo. */
+    private var channelGain = FloatArray(0)
 
     /**
-     * Sets one band's gain in dB, clamped to [MAX_GAIN_DB].
+     * Aims the equaliser. Called from whoever owns the settings, not from the
+     * audio thread; nothing here is read until the next sub-block boundary.
      *
-     * Takes effect over the next few milliseconds rather than immediately —
-     * see the glide note in the class doc.
+     * `enabled = false` is a flat curve and a centred balance rather than a
+     * bypass flag, so switching the equaliser off glides down to nothing like
+     * every other change instead of cutting the current curve out from under a
+     * playing track.
      */
-    fun setBandGain(band: Int, db: Float) {
-        if (band !in 0 until BANDS) return
-        targetGainDb[band] = db.coerceIn(-MAX_GAIN_DB, MAX_GAIN_DB)
+    fun setTuning(enabled: Boolean, curve: EqCurve, balance: Float) {
+        target = if (enabled) Tuning(curve, balance.coerceIn(-1f, 1f)) else Tuning.OFF
     }
 
-    /** All ten at once, for applying a preset or restoring saved settings. */
-    fun setGains(db: FloatArray) {
-        for (band in 0 until min(BANDS, db.size)) setBandGain(band, db[band])
+    val isEnabled: Boolean
+        get() = target !== Tuning.OFF
+
+    /**
+     * Configures the Float32 DSP engine for [sampleRate] and [channelCount].
+     */
+    fun configure(sampleRate: Int, channelCount: Int) {
+        this.sampleRate = sampleRate
+        this.channelCount = channelCount
+        val requiredSize = channelCount * EqLayout.SLOTS * 2
+        if (state.size != requiredSize) {
+            state = FloatArray(requiredSize)
+        }
+        if (channelGain.size != channelCount) {
+            channelGain = FloatArray(channelCount) { 1f }
+        }
+        running.fill(false)
+        snapToTarget()
     }
 
     /**
-     * Headroom, in dB, applied before the bands.
-     *
-     * Negative values are the point: pulling the whole signal down by the
-     * largest boost about to be applied is what stops that boost clipping.
+     * Processes interleaved Float32 audio samples in [block] in-place.
+     * Preserves dynamic headroom without clamping to [-1.0f, +1.0f].
      */
-    fun setPreamp(db: Float) {
-        targetPreampDb = db.coerceIn(-MAX_PREAMP_DB, MAX_PREAMP_DB)
+    fun process(block: AudioBlock) {
+        val frameCount = block.frameCount
+        if (frameCount == 0 || channelCount < 1 || sampleRate <= 0) return
+
+        val tuning = target
+        if (isFlat(tuning) && isSettled(tuning)) {
+            return
+        }
+
+        var remaining = frameCount
+        var frameOffset = 0
+        while (remaining > 0) {
+            val subBlock = min(remaining, GLIDE_FRAMES)
+            glideTowards(tuning)
+            val active = prepareSections()
+            prepareChannelGains()
+
+            for (f in 0 until subBlock) {
+                val baseIdx = (frameOffset + f) * channelCount
+                for (channel in 0 until channelCount) {
+                    var sample = block.samples[baseIdx + channel]
+                    for (index in 0 until active) {
+                        sample = section(activeSlots[index], channel, sample)
+                    }
+                    // Headroom is preserved: sample is stored directly as Float
+                    block.samples[baseIdx + channel] = sample * channelGain[channel]
+                }
+            }
+            flushDenormals(active)
+            frameOffset += subBlock
+            remaining -= subBlock
+        }
     }
 
-    // ---- Media3 plumbing ---------------------------------------------------
-
     /**
-     * 16-bit PCM only, matching the other two processors in this chain — and
-     * bowing out with [AudioProcessor.AudioFormat.NOT_SET] rather than throwing
-     * for the same reason they do: `DefaultAudioSink` configures every
-     * processor whether or not its effect is switched on, and a throw from any
-     * of them kills the renderer outright.
+     * 16-bit PCM, any channel count.
      */
     override fun onConfigure(inputAudioFormat: AudioProcessor.AudioFormat): AudioProcessor.AudioFormat {
         if (inputAudioFormat.encoding != C.ENCODING_PCM_16BIT || inputAudioFormat.channelCount < 1) {
             Log.w(
                 TAG,
-                "Equalizer inactive: encoding=${inputAudioFormat.encoding} " +
+                "Equaliser inactive: encoding=${inputAudioFormat.encoding} " +
                     "channels=${inputAudioFormat.channelCount} is not 16-bit PCM",
             )
             return AudioProcessor.AudioFormat.NOT_SET
         }
-        channelCount = inputAudioFormat.channelCount
-        sampleRate = inputAudioFormat.sampleRate
-        state = FloatArray(BANDS * channelCount * 2)
-        targetGainDb.copyInto(currentGainDb)
-        currentPreampDb = targetPreampDb
-        coefficientsStale = true
+        configure(inputAudioFormat.sampleRate, inputAudioFormat.channelCount)
         return inputAudioFormat
     }
 
     override fun onFlush() {
         state.fill(0f)
-        // Snapped rather than glided: a flush is a seek or a new source, so
-        // there is no continuous signal for a glide to stay continuous with.
-        targetGainDb.copyInto(currentGainDb)
-        currentPreampDb = targetPreampDb
-        coefficientsStale = true
+        running.fill(false)
+        snapToTarget()
     }
 
     override fun onReset() {
         state = FloatArray(0)
-        targetGainDb.fill(0f)
-        currentGainDb.fill(0f)
-        targetPreampDb = 0f
-        currentPreampDb = 0f
-        coefficientsStale = true
+        channelGain = FloatArray(0)
+        running.fill(false)
+        channelCount = 0
+        sampleRate = 0
     }
 
-    override fun queueInput(inputBuffer: java.nio.ByteBuffer) {
+    override fun queueInput(inputBuffer: ByteBuffer) {
         val bytesPerFrame = BYTES_PER_SAMPLE * channelCount
         if (bytesPerFrame == 0) return
         val frameCount = inputBuffer.remaining() / bytesPerFrame
         if (frameCount == 0) return
         val outputBuffer = replaceOutputBuffer(frameCount * bytesPerFrame)
 
-        // Off, or flat and already settled there, is a straight pass-through.
-        // The "already settled" half matters for the same reason it does in the
-        // transition filter: a band still gliding back to zero is still shaping
-        // the signal, and dropping it out mid-glide is the click the glide
-        // exists to avoid.
-        if (!enabled || (isFlat(targetGainDb) && targetIsSettled())) {
+        val tuning = target
+        if (isFlat(tuning) && isSettled(tuning)) {
             outputBuffer.put(inputBuffer)
             outputBuffer.flip()
             return
@@ -181,196 +203,195 @@ class EqualizerProcessor : BaseAudioProcessor() {
         inputBuffer.order(ByteOrder.nativeOrder())
         outputBuffer.order(ByteOrder.nativeOrder())
 
+        val invScale = 1.0f / 32768.0f
         var remaining = frameCount
         while (remaining > 0) {
             val block = min(remaining, GLIDE_FRAMES)
-            if (glideTowardTargets()) coefficientsStale = true
-            if (coefficientsStale) {
-                updateCoefficients()
-                coefficientsStale = false
-            }
-            val preamp = dbToLinear(currentPreampDb)
+            glideTowards(tuning)
+            val active = prepareSections()
+            prepareChannelGains()
 
             repeat(block) {
                 for (channel in 0 until channelCount) {
-                    // Normalized to ±1 so the limiter below has a fixed knee to
-                    // work against rather than one scaled to the sample format.
-                    var sample = inputBuffer.short.toFloat() / SHORT_SCALE * preamp
-                    for (band in 0 until BANDS) {
-                        sample = runBand(band, channel, sample)
+                    var sample = inputBuffer.short.toFloat() * invScale
+                    for (index in 0 until active) {
+                        sample = section(activeSlots[index], channel, sample)
                     }
-                    outputBuffer.putShort(clampToShort(softLimit(sample) * SHORT_SCALE))
+                    outputBuffer.putShort(PcmBoundary.clamp16FromFloat(sample * channelGain[channel]))
                 }
             }
+            flushDenormals(active)
             remaining -= block
         }
         outputBuffer.flip()
     }
 
+    // ---- Gliding -----------------------------------------------------------
+
+    private fun snapToTarget() {
+        val tuning = target
+        tuning.curve.gainsDb.copyInto(currentGainDb)
+        tuning.curve.qs.copyInto(currentQ)
+        currentPreampDb = tuning.curve.preampDb
+        currentBalance = tuning.balance
+    }
+
+    private fun glideTowards(tuning: Tuning) {
+        for (slot in 0 until EqLayout.SLOTS) {
+            currentGainDb[slot] = linearGlide(currentGainDb[slot], tuning.curve.gainsDb[slot])
+            currentQ[slot] = geometricGlide(currentQ[slot], tuning.curve.qs[slot])
+        }
+        currentPreampDb = linearGlide(currentPreampDb, tuning.curve.preampDb)
+        currentBalance = linearGlide(currentBalance, tuning.balance)
+    }
+
+    private fun linearGlide(current: Float, target: Float): Float =
+        current + (target - current) * GLIDE_RATE
+
+    private fun geometricGlide(current: Float, target: Float): Float {
+        val from = ln(current.coerceAtLeast(MIN_Q))
+        val to = ln(target.coerceAtLeast(MIN_Q))
+        return exp(from + (to - from) * GLIDE_RATE)
+    }
+
+    private fun isFlat(tuning: Tuning): Boolean =
+        abs(tuning.balance) < SETTLED_BALANCE &&
+            abs(tuning.curve.preampDb) < SETTLED_DB &&
+            tuning.curve.gainsDb.all { abs(it) < SETTLED_DB }
+
+    private fun isSettled(tuning: Tuning): Boolean {
+        if (abs(currentBalance - tuning.balance) >= SETTLED_BALANCE) return false
+        if (abs(currentPreampDb - tuning.curve.preampDb) >= SETTLED_DB) return false
+        for (slot in 0 until EqLayout.SLOTS) {
+            if (abs(currentGainDb[slot] - tuning.curve.gainsDb[slot]) >= SETTLED_DB) return false
+        }
+        return true
+    }
+
+    // ---- Coefficients ------------------------------------------------------
+
+    private fun prepareSections(): Int {
+        var active = 0
+        for (slot in 0 until EqLayout.SLOTS) {
+            if (abs(currentGainDb[slot]) >= SETTLED_DB) {
+                updateCoefficients(slot)
+                activeSlots[active++] = slot
+                running[slot] = true
+            } else if (running[slot]) {
+                clearState(slot)
+                running[slot] = false
+            }
+        }
+        return active
+    }
+
+    private fun updateCoefficients(slot: Int) {
+        if (sampleRate <= 0) return
+        val spec = EqLayout.slots[slot]
+        val a = 10f.pow(currentGainDb[slot] / 40f)
+        val q = currentQ[slot].coerceAtLeast(MIN_Q)
+        val base = tan(Math.PI * usableFrequency(spec.frequencyHz) / sampleRate).toFloat()
+        val g: Float
+        val k: Float
+        when (spec.kind) {
+            FilterKind.BELL -> {
+                g = base
+                k = 1f / (q * a)
+                mixInput[slot] = 1f
+                mixBand[slot] = k * (a * a - 1f)
+                mixLow[slot] = 0f
+            }
+            FilterKind.LOW_SHELF -> {
+                g = base / sqrt(a)
+                k = 1f / q
+                mixInput[slot] = 1f
+                mixBand[slot] = k * (a - 1f)
+                mixLow[slot] = a * a - 1f
+            }
+            FilterKind.HIGH_SHELF -> {
+                g = base * sqrt(a)
+                k = 1f / q
+                mixInput[slot] = a * a
+                mixBand[slot] = k * (1f - a) * a
+                mixLow[slot] = 1f - a * a
+            }
+        }
+        val d = 1f / (1f + g * (g + k))
+        coeffA1[slot] = d
+        coeffA2[slot] = g * d
+        coeffA3[slot] = g * (g * d)
+    }
+
+    private fun usableFrequency(hz: Float): Float =
+        hz.coerceIn(MIN_HZ, sampleRate * MAX_FREQUENCY_FRACTION)
+
+    private fun prepareChannelGains() {
+        val preamp = 10f.pow(currentPreampDb / 20f)
+        if (channelCount == 2) {
+            channelGain[0] = preamp * min(1f, 1f - currentBalance)
+            channelGain[1] = preamp * min(1f, 1f + currentBalance)
+        } else {
+            channelGain.fill(preamp)
+        }
+    }
+
     // ---- Filter ------------------------------------------------------------
 
-    /** @return true if anything actually moved, so coefficients need rebuilding. */
-    private fun glideTowardTargets(): Boolean {
-        var moved = false
-        for (band in 0 until BANDS) {
-            val delta = targetGainDb[band] - currentGainDb[band]
-            if (abs(delta) > SETTLED_DB) {
-                currentGainDb[band] += delta * GLIDE_RATE
-                moved = true
-            } else if (currentGainDb[band] != targetGainDb[band]) {
-                currentGainDb[band] = targetGainDb[band]
-                moved = true
+    private fun section(slot: Int, channel: Int, input: Float): Float {
+        val i = (channel * EqLayout.SLOTS + slot) * 2
+        val ic1 = state[i]
+        val ic2 = state[i + 1]
+        val v3 = input - ic2
+        val v1 = coeffA1[slot] * ic1 + coeffA2[slot] * v3
+        val v2 = ic2 + coeffA2[slot] * ic1 + coeffA3[slot] * v3
+        state[i] = 2f * v1 - ic1
+        state[i + 1] = 2f * v2 - ic2
+        return mixInput[slot] * input + mixBand[slot] * v1 + mixLow[slot] * v2
+    }
+
+    private fun clearState(slot: Int) {
+        for (channel in 0 until channelCount) {
+            val i = (channel * EqLayout.SLOTS + slot) * 2
+            state[i] = 0f
+            state[i + 1] = 0f
+        }
+    }
+
+    private fun flushDenormals(active: Int) {
+        for (index in 0 until active) {
+            val slot = activeSlots[index]
+            for (channel in 0 until channelCount) {
+                val i = (channel * EqLayout.SLOTS + slot) * 2
+                if (abs(state[i]) < DENORMAL_FLOOR) state[i] = 0f
+                if (abs(state[i + 1]) < DENORMAL_FLOOR) state[i + 1] = 0f
             }
         }
-        val preampDelta = targetPreampDb - currentPreampDb
-        if (abs(preampDelta) > SETTLED_DB) {
-            currentPreampDb += preampDelta * GLIDE_RATE
-        } else {
-            currentPreampDb = targetPreampDb
-        }
-        return moved
     }
-
-    private fun targetIsSettled(): Boolean {
-        for (band in 0 until BANDS) {
-            if (abs(currentGainDb[band] - targetGainDb[band]) > SETTLED_DB) return false
-        }
-        return abs(currentPreampDb - targetPreampDb) <= SETTLED_DB
-    }
-
-    private fun isFlat(gains: FloatArray): Boolean {
-        for (g in gains) if (abs(g) > SETTLED_DB) return false
-        return abs(targetPreampDb) <= SETTLED_DB
-    }
-
-    /**
-     * The standard peaking-EQ biquad, one per band, normalized by `a0`.
-     *
-     * A band sitting at 0 dB still gets coefficients — they come out as exact
-     * unity and cost one multiply-add chain per sample. Skipping those
-     * individually was measured as slower than running them: the branch per
-     * band per sample costs more than the arithmetic it avoids.
-     */
-    private fun updateCoefficients() {
-        val nyquist = sampleRate / 2f
-        for (band in 0 until BANDS) {
-            val f0 = FREQUENCIES[band]
-            // A band above Nyquist has nothing to act on; park it at unity so
-            // 16 kHz does not blow up on a 22.05 kHz stream.
-            if (f0 >= nyquist * MAX_FREQ_FRACTION) {
-                setUnity(band)
-                continue
-            }
-            val a = dbToLinear(currentGainDb[band] / 2f)
-            val w0 = TWO_PI * f0 / sampleRate
-            val cosW0 = cos(w0.toDouble()).toFloat()
-            val alpha = sin(w0.toDouble()).toFloat() / (2f * Q_OCTAVE)
-
-            val b0 = 1f + alpha * a
-            val b1 = -2f * cosW0
-            val b2 = 1f - alpha * a
-            val a0 = 1f + alpha / a
-            val a1 = -2f * cosW0
-            val a2 = 1f - alpha / a
-
-            val i = band * 5
-            coefficients[i] = b0 / a0
-            coefficients[i + 1] = b1 / a0
-            coefficients[i + 2] = b2 / a0
-            coefficients[i + 3] = a1 / a0
-            coefficients[i + 4] = a2 / a0
-        }
-    }
-
-    private fun setUnity(band: Int) {
-        val i = band * 5
-        coefficients[i] = 1f
-        coefficients[i + 1] = 0f
-        coefficients[i + 2] = 0f
-        coefficients[i + 3] = 0f
-        coefficients[i + 4] = 0f
-    }
-
-    /** Transposed direct form II — see the class doc for why this form. */
-    private fun runBand(band: Int, channel: Int, input: Float): Float {
-        val c = band * 5
-        val s = (band * channelCount + channel) * 2
-        val z1 = state[s]
-        val z2 = state[s + 1]
-        val output = coefficients[c] * input + z1
-        state[s] = coefficients[c + 1] * input - coefficients[c + 3] * output + z2
-        state[s + 1] = coefficients[c + 2] * input - coefficients[c + 4] * output
-        return output
-    }
-
-    /**
-     * A soft knee at the top of the range, so a boosted peak rounds over
-     * instead of being sheared flat.
-     *
-     * Below [LIMIT_KNEE] this is exactly unity — the overwhelming majority of
-     * samples, on which it costs one comparison. Above it, `tanh` maps the
-     * remaining headroom onto an asymptote at 1.0, so nothing can reach full
-     * scale however hard the bands are pushed. That is audibly a compressor
-     * rather than a clipper: harmonic, not fizzy.
-     */
-    private fun softLimit(sample: Float): Float {
-        val magnitude = abs(sample)
-        if (magnitude <= LIMIT_KNEE) return sample
-        val excess = (magnitude - LIMIT_KNEE) / (1f - LIMIT_KNEE)
-        val limited = LIMIT_KNEE + (1f - LIMIT_KNEE) * tanh(excess.toDouble()).toFloat()
-        return if (sample < 0f) -limited else limited
-    }
-
-    private fun clampToShort(value: Float): Short =
-        value.coerceIn(Short.MIN_VALUE.toFloat(), Short.MAX_VALUE.toFloat()).toInt().toShort()
-
-    private fun dbToLinear(db: Float): Float =
-        Math.pow(10.0, (db / 20f).toDouble()).toFloat()
 
     companion object {
         private const val TAG = "AvyraEqualizer"
 
-        /** ISO octave centres, the spacing every graphic EQ people have used runs on. */
-        val FREQUENCIES = floatArrayOf(
-            31f, 62f, 125f, 250f, 500f, 1_000f, 2_000f, 4_000f, 8_000f, 16_000f,
-        )
-
-        /** Short labels for the UI, so it never has to format these itself. */
-        val LABELS = arrayOf(
-            "31", "62", "125", "250", "500", "1k", "2k", "4k", "8k", "16k",
-        )
-
-        const val BANDS = 10
-
-        /**
-         * Wide enough that ten bands sum to something smooth rather than ten
-         * separate bumps, narrow enough that each still belongs to its own
-         * octave. The constant-Q value for one-octave spacing.
-         */
-        private const val Q_OCTAVE = 1.414f
-
-        /** The range the sliders offer. Past this an EQ stops shaping and starts breaking. */
-        const val MAX_GAIN_DB = 12f
-
-        const val MAX_PREAMP_DB = 12f
-
         private const val BYTES_PER_SAMPLE = 2
-        private const val SHORT_SCALE = 32768f
-        private const val TWO_PI = 6.283185f
 
-        /** Frames between coefficient rebuilds. ~1.5 ms at 44.1 kHz. */
+        /** Frames between coefficient updates. ~1.5 ms at 44.1 kHz. */
         private const val GLIDE_FRAMES = 64
 
-        /** Per-block glide fraction, matching the transition filter's feel. */
-        private const val GLIDE_RATE = 0.05f
+        /** Per-sub-block glide fraction. ~18 ms time constant — a fast drag still tracks. */
+        private const val GLIDE_RATE = 0.08f
 
-        /** Close enough to a target to call it reached, so a glide terminates. */
+        /** Below this a band is doing nothing anyone can hear, so it counts as flat. */
         private const val SETTLED_DB = 0.01f
 
-        /** Where the limiter starts rounding. Roughly -1.6 dBFS. */
-        private const val LIMIT_KNEE = 0.83f
+        /** Same idea for the balance trim, where the scale is -1 to 1. */
+        private const val SETTLED_BALANCE = 0.0005f
 
-        /** Keeps a band's centre clear of Nyquist, where the maths degenerates. */
-        private const val MAX_FREQ_FRACTION = 0.9f
+        private const val MIN_Q = 0.05f
+        private const val MIN_HZ = 10f
+
+        /** Keeps `tan` away from its pole at Nyquist. */
+        private const val MAX_FREQUENCY_FRACTION = 0.45f
+
+        /** Safe noise floor threshold to prevent floating point denormals. */
+        private const val DENORMAL_FLOOR = 1e-12f
     }
 }

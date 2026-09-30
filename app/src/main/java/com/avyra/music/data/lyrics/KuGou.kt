@@ -122,7 +122,7 @@ object KuGou {
      * "label: value", and only within the first and last 30 lines so a legit
      * lyric that happens to contain a colon deep in the song is left alone.
      */
-    internal fun String.stripCredits(): String {
+    fun String.stripCredits(): String {
         val lines = lineSequence().filter { STAMPED.matches(it) }.toList()
         if (lines.isEmpty()) return ""
         val headLimit = min(30, lines.lastIndex)

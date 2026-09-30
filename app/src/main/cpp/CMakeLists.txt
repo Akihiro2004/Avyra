@@ -42,3 +42,8 @@ target_compile_options(avyra_analysis PRIVATE -O3 -fvisibility=hidden)
 
 find_library(log-lib log)
 target_link_libraries(avyra_analysis ${log-lib})
+
+# 16KB page-size support (Android 15+ 16KB kernels, Play requirement): align
+# LOAD segments to 16KB. A superset of 4KB alignment, so 4KB devices are
+# unaffected. APK-side alignment of uncompressed .so files is handled by AGP.
+target_link_options(avyra_analysis PRIVATE "-Wl,-z,max-page-size=16384")

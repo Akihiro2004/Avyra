@@ -36,7 +36,7 @@ package com.avyra.music.playback.smart
 object MelSpectrogram {
 
     /** True when the native library loaded. Analysis is optional, so this is a fact, not a fault. */
-    val available: Boolean = runCatching { System.loadLibrary("avyra_analysis") }.isSuccess
+    val available: Boolean get() = NativeAnalysisLibrary.available
 
     /** Mel bands per frame; the model's input width. */
     val mels: Int by lazy { if (available) nativeMelCount() else 128 }

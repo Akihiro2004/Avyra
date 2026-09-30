@@ -58,7 +58,8 @@ val lastfmSecret: String = (
 
 android {
     namespace = "com.avyra.music"
-    compileSdk = 36
+    // InnerTubeX's AAR requires compiling against 37; targetSdk (runtime behaviour) stays 36.
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.avyra.music"
@@ -91,6 +92,7 @@ android {
             abiFilters += listOf("arm64-v8a", "x86_64")
         }
     }
+
 
     externalNativeBuild {
         cmake {
@@ -167,13 +169,13 @@ android {
         release {
             /*
              * Off deliberately. Stream resolution runs YouTube's own player
-             * JavaScript through Rhino, and NewPipe, Ktor and
-             * kotlinx.serialization all reach for classes reflectively — none
-             * of which R8 can see. Shrinking that reliably is a set of keep
-             * rules to be written and then proven on a device, because the
-             * breakage it causes appears at runtime rather than at build time.
-             * Until then, a larger APK that works beats a smaller one that
-             * might not. The rules below stay wired up for when it's revisited.
+             * JavaScript through Rhino, and NewPipe, InnerTubeX, QuickJS, SMBJ,
+             * Ktor and kotlinx.serialization all reach for classes reflectively
+             * — none of which R8 can see. The keep rules in proguard-rules.pro
+             * come from BitChord, which ships with R8 on; turning it on here is
+             * worth doing once a shrunk build has been proven on a device,
+             * because the breakage it causes appears at runtime rather than at
+             * build time.
              */
             isMinifyEnabled = false
             proguardFiles(
@@ -188,6 +190,12 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+    }
+    packaging {
+        resources {
+            // SMBJ's BouncyCastle and jspecify both ship this descriptor.
+            excludes += "META-INF/versions/9/OSGI-INF/MANIFEST.MF"
+        }
     }
     buildFeatures {
         compose = true
@@ -250,6 +258,13 @@ dependencies {
     // ---- Compose (Material 3) ----
     val composeBom = platform("androidx.compose:compose-bom:2024.12.01")
     implementation(composeBom)
+    // Pinned above the BOM's 1.7.6: [IosOverscroll] uses OverscrollFactory,
+    // which that version doesn't have. Newer foundation alongside the BOM's
+    // older ui/material3 is a combination Compose supports deliberately —
+    // foundation depends on ui, not the reverse — and this exact pairing was
+    // already in effect (foundation was reaching 1.10.0 transitively through
+    // the liquid-glass library before that dependency was removed).
+    implementation("androidx.compose.foundation:foundation:1.10.0")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
@@ -271,6 +286,14 @@ dependencies {
     // Audio is progressive, but Apple serves its motion artwork as HLS — this
     // is what lets the animated sleeve play it. See CanvasArtworkPlayer.
     implementation("androidx.media3:media3-exoplayer-hls:1.11.0")
+    // Source modules hand back manifests rather than files, and which kind is
+    // the backend's choice, not ours: the Tidal one served `.m3u8` until
+    // September 2026 and `.mpd` after it, for the same track and the same
+    // request. Without this artifact a DASH manifest is not merely unplayed —
+    // DefaultMediaSourceFactory cannot build a source for it, falls back to
+    // progressive, and the extractors try to sniff XML as audio
+    // (ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED). See withResolvedStreamType.
+    implementation("androidx.media3:media3-exoplayer-dash:1.11.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-guava:1.9.0")
 
     // ---- Images: Coil 3 + Palette (dominant colors for the mesh gradient) ----
@@ -289,14 +312,19 @@ dependencies {
     implementation("com.halilibo.compose-richtext:richtext-commonmark:0.20.0")
 
     // ---- Innertube (YouTube Music) client: Ktor + kotlinx.serialization ----
-    implementation("io.ktor:ktor-client-core:3.0.3")
-    implementation("io.ktor:ktor-client-okhttp:3.0.3")
-    implementation("io.ktor:ktor-client-content-negotiation:3.0.3")
-    implementation("io.ktor:ktor-serialization-kotlinx-json:3.0.3")
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+    // Ktor and serialization are held at InnerTubeX's versions (below) so the
+    // upgrade it forces is explicit rather than resolved behind our backs.
+    implementation("io.ktor:ktor-client-core:3.5.2")
+    implementation("io.ktor:ktor-client-okhttp:3.5.2")
+    implementation("io.ktor:ktor-client-content-negotiation:3.5.2")
+    implementation("io.ktor:ktor-serialization-kotlinx-json:3.5.2")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
 
     // ---- Discord Rich Presence: the gateway is a WebSocket, so Ktor needs the plugin ----
-    implementation("io.ktor:ktor-client-websockets:3.0.3")
+    implementation("io.ktor:ktor-client-websockets:3.5.2")
+
+    // ---- YouTube stream extraction: live-benchmarked client catalog + cipher tiers ----
+    implementation("com.github.MetrolistGroup.innertubex:innertubex-android:v0.7.0")
 
     // ---- Stream resolution: NewPipe solves YouTube's signature + `n` throttling ----
     // Pinned to v0.26.3, not the newer v0.26.4: v0.26.4's player-JS parser fails with
@@ -323,7 +351,11 @@ dependencies {
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
 
     // ---- JS module execution: QuickJS VM for style source plugins ----
-    implementation("io.github.dokar3:quickjs-kt-android:1.0.5")
+    // Held at InnerTubeX's version; the same VM runs QuickJsExecutor's module sources.
+    implementation("io.github.dokar3:quickjs-kt-android:1.0.14")
+
+    // ---- SMB file shares: pure-Java SMB2/3 client (listing + streaming) ----
+    implementation("com.hierynomus:smbj:0.15.0")
 
     // ---- Automix: on-device beat/downbeat model (Beat This!, MIT-licensed) ----
     // The full android artifact, not onnxruntime-mobile: mobile only loads .ort
@@ -332,6 +364,48 @@ dependencies {
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.28.0")
 
     testImplementation("junit:junit:4.13.2")
+    // The tests that came over from BitChord's shared modules are written against kotlin.test.
+    testImplementation(kotlin("test"))
+    // A real HTTP server for the addon tests. The addon protocol is entirely
+    // "what does this app send, and what does it do with what comes back", and
+    // a hand-rolled fake of the client would be a test of the fake. Pinned to
+    // the OkHttp version already on the runtime classpath.
+    testImplementation("com.squareup.okhttp3:mockwebserver:5.3.2")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.7.0")
 }
+
+/*
+ * A debug APK lands on the device uncompiled — `dumpsys package dexopt` reports
+ * it as run-from-apk — so every launch verifies the whole app's classes at
+ * runtime before a line of our code runs. Measured on the BlueStacks box, that
+ * was about two seconds of every cold start and most of why the dev build felt
+ * so much slower than a release one. `verify` is the cheapest filter that
+ * removes it (~15s once per install), and unlike `speed` it leaves the debug
+ * build debuggable exactly as before.
+ *
+ * Runs after `installDevDebug` from the command line. Android Studio's Run
+ * button deploys on its own and never reaches this task, so from there run
+ * `./gradlew verifyDevInstall` after installing.
+ */
+val verifyDevInstall = tasks.register("verifyDevInstall") {
+    group = "install"
+    description = "Pre-verifies the installed dev build on every connected device."
+    val adb = androidComponents.sdkComponents.adb
+    doLast {
+        val adbPath = adb.get().asFile.absolutePath
+        val serials = ProcessBuilder(adbPath, "devices").start()
+            .inputStream.bufferedReader().readLines()
+            .drop(1)
+            .mapNotNull { line -> line.split('\t').takeIf { it.size == 2 && it[1] == "device" }?.get(0) }
+        serials.forEach { serial ->
+            logger.lifecycle("verifyDevInstall: compiling com.dev.avyra on $serial")
+            ProcessBuilder(
+                adbPath, "-s", serial, "shell", "cmd", "package", "compile",
+                "-m", "verify", "-f", "com.dev.avyra",
+            ).inheritIO().start().waitFor()
+        }
+    }
+}
+tasks.matching { it.name == "installDevDebug" }.configureEach { finalizedBy(verifyDevInstall) }

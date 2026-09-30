@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import com.avyra.music.auth.EncryptedPrefs
 
 /**
  * Moves data written by builds that still used the old internal identity.
@@ -28,6 +29,11 @@ internal object LegacyDataMigration {
         }
     }
 
+    /**
+     * The current encrypted store, opened through [EncryptedPrefs] so a keyset
+     * a restore left unreadable is repaired rather than abandoned, topped up
+     * with anything the old identity's files hold that it does not.
+     */
     fun encryptedPreferences(
         context: Context,
         currentEncryptedName: String,
@@ -35,15 +41,13 @@ internal object LegacyDataMigration {
         currentPlainName: String,
         legacyPlainName: String,
     ): SharedPreferences {
-        val masterKey = MasterKey.Builder(context)
-            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-            .build()
-        val current = encrypted(context, currentEncryptedName, masterKey)
-
-        runCatching { encrypted(context, legacyEncryptedName, masterKey) }
-            .getOrNull()
-            ?.let { copyMissing(it, current) }
-        copyMissing(context.getSharedPreferences(currentPlainName, Context.MODE_PRIVATE), current)
+        val current = EncryptedPrefs.open(context, currentEncryptedName, currentPlainName)
+        runCatching {
+            val masterKey = MasterKey.Builder(context)
+                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                .build()
+            encrypted(context, legacyEncryptedName, masterKey)
+        }.getOrNull()?.let { copyMissing(it, current) }
         copyMissing(context.getSharedPreferences(legacyPlainName, Context.MODE_PRIVATE), current)
         return current
     }

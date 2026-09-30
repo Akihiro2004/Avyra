@@ -115,11 +115,11 @@ class ScrobbleManager(
     }
 
     private fun scrobbleSong(song: Song, durationSeconds: Int) {
-        val artist = song.artist.forScrobble()
+        val scrobbleArtist = song.artist.forScrobble()
         scope.launch {
             LastFM
                 .scrobble(
-                    artist = artist,
+                    artist = scrobbleArtist,
                     track = song.title,
                     duration = durationSeconds,
                     timestamp = songStartedAt,
@@ -134,11 +134,11 @@ class ScrobbleManager(
     }
 
     private fun updateNowPlaying(song: Song) {
-        val artist = song.artist.forScrobble()
+        val scrobbleArtist = song.artist.forScrobble()
         scope.launch {
             LastFM
                 .updateNowPlaying(
-                    artist = artist,
+                    artist = scrobbleArtist,
                     track = song.title,
                     album = song.albumName,
                     duration = song.durationText?.let { parseDurationSeconds(it) },

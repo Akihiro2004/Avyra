@@ -76,7 +76,7 @@ object EnhancedLrc {
      * `&#x27;` and would be sung literally. Metrolist shipped that bug; this
      * is the fix.
      */
-    internal fun decodeEntities(text: String): String {
+    fun decodeEntities(text: String): String {
         if ('&' !in text) return text
         return text
             .replace(Regex("&#x([0-9a-fA-F]+);")) { it.groupValues[1].toInt(16).toChar().toString() }

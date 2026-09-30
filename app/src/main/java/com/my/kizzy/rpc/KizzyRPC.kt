@@ -22,7 +22,10 @@ import io.ktor.client.HttpClient
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.statement.bodyAsText
-import org.json.JSONObject
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * Modified by Zion Huang
@@ -170,12 +173,17 @@ open class KizzyRPC(
                     header("X-Super-Properties", superPropertiesBase64)
                 }
             }.bodyAsText()
-            val json = JSONObject(response)
-            val id = json.getString("id")
-            val username = json.getString("username")
-            val name = json.optString("global_name", username)
-            val avatarHash = json.optString("avatar")
-            val avatar = if (avatarHash.isNotEmpty() && avatarHash != "null") {
+            // kotlinx rather than org.json: this module is shared with the
+            // desktop, which has no Android JSON on its classpath.
+            val json = Json { ignoreUnknownKeys = true }
+                .parseToJsonElement(response).jsonObject
+            fun field(name: String): String? =
+                json[name]?.jsonPrimitive?.contentOrNull?.takeIf { it != "null" }
+            val id = field("id") ?: error("Discord returned no user id")
+            val username = field("username") ?: error("Discord returned no username")
+            val name = field("global_name") ?: username
+            val avatarHash = field("avatar").orEmpty()
+            val avatar = if (avatarHash.isNotEmpty()) {
                 "https://cdn.discordapp.com/avatars/$id/$avatarHash.png"
             } else {
                 null

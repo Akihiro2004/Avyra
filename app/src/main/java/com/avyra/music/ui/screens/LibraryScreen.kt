@@ -22,7 +22,9 @@ import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed as gridItemsIndexed
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.LibraryMusic
+import androidx.compose.material.icons.rounded.Storage
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -143,6 +145,11 @@ fun LibraryScreen(
      * without going through that folder.
      */
     downloadedPlaylists: List<SavedCollection> = emptyList(),
+    /**
+     * The "On Device" rows — see `libraryDeviceItems`, which adds the remote
+     * libraries and downloaded playlists to the two device folders.
+     */
+    deviceItems: List<ShelfItem> = libraryDeviceItems(downloadedPlaylists),
 ) {
     val pinnedPlaylists by AppSettings.pinnedPlaylists.collectAsStateWithLifecycle()
     PullToRefresh(
@@ -165,25 +172,7 @@ fun LibraryScreen(
                 )
             }
             librarySection(
-                shelf = HomeShelf(
-                    title = ON_DEVICE,
-                    items = listOf(
-                        ShelfItem(
-                            title = "Downloads",
-                            subtitle = "Downloaded songs",
-                            thumbnailUrl = null,
-                            videoId = null,
-                            browseId = "local:downloads",
-                        ),
-                        ShelfItem(
-                            title = "Local Music",
-                            subtitle = "Audio files on device",
-                            thumbnailUrl = null,
-                            videoId = null,
-                            browseId = "local:all",
-                        ),
-                    ),
-                ),
+                shelf = HomeShelf(title = ON_DEVICE, items = deviceItems),
                 onItemClick = onShelfItemClick,
             )
             if (!signedIn) {
@@ -320,6 +309,16 @@ private fun SectionLeading(item: ShelfItem, circular: Boolean) {
         "local:downloads" -> LibraryIconTile(icon = AvyraIcons.Download)
         "local:all" -> LibraryIconTile(
             icon = Icons.Rounded.LibraryMusic,
+            container = MaterialTheme.colorScheme.secondaryContainer,
+            tint = MaterialTheme.colorScheme.onSecondaryContainer,
+        )
+        com.avyra.music.data.webdav.WebDavConfig.BROWSE_ID -> LibraryIconTile(
+            icon = Icons.Rounded.Folder,
+            container = MaterialTheme.colorScheme.secondaryContainer,
+            tint = MaterialTheme.colorScheme.onSecondaryContainer,
+        )
+        com.avyra.music.data.smb.SmbConfig.BROWSE_ID -> LibraryIconTile(
+            icon = Icons.Rounded.Storage,
             container = MaterialTheme.colorScheme.secondaryContainer,
             tint = MaterialTheme.colorScheme.onSecondaryContainer,
         )

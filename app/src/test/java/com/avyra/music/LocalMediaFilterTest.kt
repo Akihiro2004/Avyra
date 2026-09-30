@@ -6,35 +6,55 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class LocalMediaFilterTest {
-    @Test fun `short audio is rejected`() = assertFalse(
-        LocalMediaRepository.isEligibleLocalMusic(
-            29_999,
-            "effect.mp3",
-            "/storage/emulated/0/Music/effect.mp3",
-        ),
-    )
 
-    @Test fun `voice recorder output is rejected`() = assertFalse(
-        LocalMediaRepository.isEligibleLocalMusic(
-            180_000,
-            "voice-note.mp3",
-            "/storage/emulated/0/Voice Recorder/voice-note.mp3",
-        ),
-    )
+    @Test
+    fun rejectsShortAudio() {
+        assertFalse(
+            LocalMediaRepository.isEligibleLocalMusic(
+                durationMs = 29_999,
+                displayName = "effect.mp3",
+                path = "/storage/emulated/0/Music/effect.mp3",
+            ),
+        )
+    }
 
-    @Test fun `ordinary lossless music is retained`() = assertTrue(
-        LocalMediaRepository.isEligibleLocalMusic(
-            180_000,
-            "Song.flac",
-            "/storage/emulated/0/Music/Artist/Song.flac",
-        ),
-    )
+    @Test
+    fun rejectsWaveAndRecorderFiles() {
+        assertFalse(
+            LocalMediaRepository.isEligibleLocalMusic(
+                durationMs = 180_000,
+                displayName = "recording.wav",
+                path = "/storage/emulated/0/Recordings/recording.wav",
+            ),
+        )
+        assertFalse(
+            LocalMediaRepository.isEligibleLocalMusic(
+                durationMs = 180_000,
+                displayName = "voice-note.mp3",
+                path = "/storage/emulated/0/Voice Recorder/voice-note.mp3",
+            ),
+        )
+    }
 
-    @Test fun `long wav music is retained for Avyra`() = assertTrue(
-        LocalMediaRepository.isEligibleLocalMusic(
-            180_000,
-            "Song.wav",
-            "/storage/emulated/0/Music/Artist/Song.wav",
-        ),
-    )
+    @Test
+    fun keepsSupportedMusicFiles() {
+        assertTrue(
+            LocalMediaRepository.isEligibleLocalMusic(
+                durationMs = 50_000,
+                displayName = "Song.flac",
+                path = "/storage/emulated/0/Music/Artist/Song.flac",
+            ),
+        )
+    }
+
+    @Test
+    fun `long wav music is retained for Avyra`() {
+        assertTrue(
+            LocalMediaRepository.isEligibleLocalMusic(
+                durationMs = 180_000,
+                displayName = "Song.wav",
+                path = "/storage/emulated/0/Music/Artist/Song.wav",
+            ),
+        )
+    }
 }
