@@ -1,0 +1,3 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024"><defs><linearGradient id="avyra" x1="96" y1="96" x2="928" y2="928" gradientUnits="userSpaceOnUse">
+<stop stop-color="#5B173F"/><stop offset=".52" stop-color="#C93672"/><stop offset="1" stop-color="#FF7A45"/>
+</linearGradient></defs><rect width="1024" height="1024" rx="224" fill="url(#avyra)"/><path fill="white" fill-rule="evenodd" d="M250 860 C173 860 126 779 161 710 L425 193 C461 122 563 122 599 193 L863 710 C898 779 851 860 774 860 C733 860 698 838 679 801 L568 650 C545 605 479 605 456 650 L345 801 C326 838 291 860 250 860 Z M446 388 Q446 364 467 376 L607 457 Q628 469 607 481 L467 562 Q446 574 446 550 Z" transform="translate(0 0) scale(1)"/></svg>
